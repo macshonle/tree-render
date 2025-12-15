@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Variable-size Tree Layout (Canvas)</title>
+  <style>
+    :root { color-scheme: light dark; }
+
+    body{
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 12px;
+      max-width: 1300px;
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    label{ display:inline-flex; gap:8px; align-items:center; }
+    input[type="range"]{ width: 220px; }
+
+    .hint{
+      opacity:.8;
+      font-size:12px;
+      max-width: 1300px;
+      margin: 8px 0 10px 0;
+    }
+
+    .pill{
+      padding:2px 8px;
+      border:1px solid rgba(127,127,127,.35);
+      border-radius:999px;
+      font-size:12px;
+    }
+
+    .modebar{
+      display:inline-flex;
+      border:1px solid rgba(127,127,127,.35);
+      border-radius: 999px;
+      overflow:hidden;
+    }
+    .modebtn{
+      appearance:none;
+      border:0;
+      background:transparent;
+      padding:6px 12px;
+      font: 12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      cursor:pointer;
+      color: inherit;
+    }
+    .modebtn + .modebtn{
+      border-left:1px solid rgba(127,127,127,.35);
+    }
+    .modebtn[aria-pressed="true"]{
+      background: rgba(127,127,127,.18);
+    }
+
+    canvas{
+      border:1px solid rgba(127,127,127,.35);
+      border-radius:10px;
+      display:block;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <label>Test case
+      <select id="caseSel">
+        <option value="stress1">1) Mixed tall internal nodes + wide labels</option>
+        <option value="stress2">2) Alternating image/text internal nodes</option>
+        <option value="stress3">3) “Comb + fan-out” extreme widths</option>
+      </select>
+    </label>
+
+    <div class="modebar" role="group" aria-label="layout mode">
+      <button class="modebtn" id="btnLeft" aria-pressed="false" type="button">left</button>
+      <button class="modebtn" id="btnBalanced" aria-pressed="true" type="button">balanced</button>
+      <button class="modebtn" id="btnRight" aria-pressed="false" type="button">right</button>
+    </div>
+
+    <label>Vertical gap
+      <input id="vgap" type="range" min="8" max="140" value="36" />
+      <span class="pill" id="vgapVal"></span>
+    </label>
+
+    <label>Horizontal gap
+      <input id="hgap" type="range" min="0" max="220" value="8" />
+      <span class="pill" id="hgapVal"></span>
+    </label>
+
+    <label><input id="showBoxes" type="checkbox" checked /> node boxes</label>
+    <label><input id="showLinks" type="checkbox" checked /> edges</label>
+    <label><input id="showContours" type="checkbox" /> debug contours</label>
+  </div>
+
+  <p class="hint">
+    New: edges are ≥3px and glow on hover (hit-tested on the actual bezier curve).
+    This will be used for selecting edges next.
+  </p>
+
+  <canvas id="c" width="1200" height="760"></canvas>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  // Controls
+  const caseSel = document.getElementById("caseSel");
+  const vgapEl = document.getElementById("vgap");
+  const hgapEl = document.getElementById("hgap");
+  const vgapVal = document.getElementById("vgapVal");
+  const hgapVal = document.getElementById("hgapVal");
+  const showBoxesEl = document.getElementById("showBoxes");
+  const showLinksEl = document.getElementById("showLinks");
+  const showContoursEl = document.getElementById("showContours");
+
+  const btnLeft = document.getElementById("btnLeft");
+  const btnBalanced = document.getElementById("btnBalanced");
+  const btnRight = document.getElementById("btnRight");
+
+  let MODE = "balanced";
+
+  const ROW_H = 4;               // contour sampling step (px)
+  const PAD_X = 10, PAD_Y = 7;   // text padding (px)
+  const RADIUS = 10;             // node corner radius (px)
+
+  // Edge styling + hit testing
+  const EDGE_W = 3;              // >= 3px, per request
+  const EDGE_HIT_PAD = 10;       // forgiving hover target (px)
+  const EDGE_HIT_SAMPLES = 28;   // points sampled along curve for hit-test
+
+  let LAST_DRAW = null;          // { root, opts, tx, ty, edges } for hover hit-test
+  let HOVER_EDGE = null;         // { parentId, childId } or null
+
+  // ----------------------------
+  // Text measurement / rendering
+  // ----------------------------
+  function measureTextBoxMultiline(text, font) {
+    ctx.save();
+    ctx.font = font; // MUST match rendering exactly
+    const lines = String(text).split("\n");
+    const widths = lines.map(s => ctx.measureText(s).width);
+
+    const fontPx = parseInt(font.match(/(\d+)px/)?.[1] ?? "14", 10);
+    const lineH = Math.ceil(fontPx * 1.25);
+
+    ctx.restore();
+    return {
+      w: Math.ceil(Math.max(0, ...widths)) + PAD_X * 2,
+      h: (lines.length * lineH) + PAD_Y * 2,
+      lines,
+      lineH,
+      fontPx
+    };
+  }
+
+  function roundedRectPath(x, y, w, h, r) {
+    const rr = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  // ----------------------------
+  // Contours
+  // ----------------------------
+  function makeEmptyContour(rows) {
+    return { left: new Array(rows).fill(+Infinity), right: new Array(rows).fill(-Infinity) };
+  }
+
+  function contourFromNodeBox(w, h) {
+    const rows = Math.ceil(h / ROW_H);
+    const c = makeEmptyContour(rows);
+    const L = -w / 2;
+    const R =  w / 2;
+    for (let i = 0; i < rows; i++) { c.left[i] = L; c.right[i] = R; }
+    return { ...c, height: h };
+  }
+
+  function mergeContours(dst, src, dx, dy) {
+    const rowShift = Math.floor(dy / ROW_H);
+    const needRows = Math.max(dst.left.length, rowShift + src.left.length);
+
+    if (needRows > dst.left.length) {
+      const add = needRows - dst.left.length;
+      dst.left.push(...new Array(add).fill(+Infinity));
+      dst.right.push(...new Array(add).fill(-Infinity));
+    }
+
+    for (let i = 0; i < src.left.length; i++) {
+      const j = i + rowShift;
+      dst.left[j] = Math.min(dst.left[j], src.left[i] + dx);
+      dst.right[j] = Math.max(dst.right[j], src.right[i] + dx);
+    }
+  }
+
+  function contourMinMaxX(contour) {
+    let mn = +Infinity, mx = -Infinity;
+    for (let i = 0; i < contour.left.length; i++) {
+      mn = Math.min(mn, contour.left[i]);
+      mx = Math.max(mx, contour.right[i]);
+    }
+    return { mn, mx };
+  }
+
+  // Place "next" to the RIGHT of "placed", minimally, respecting hgap.
+  function requiredShiftRightOf(placed, next, hgap, dy) {
+    const rowShift = Math.floor(dy / ROW_H);
+    let dx = -Infinity;
+
+    const maxRow = Math.min(placed.right.length, rowShift + next.left.length);
+    for (let j = 0; j < maxRow; j++) {
+      const i = j - rowShift;
+      if (i < 0 || i >= next.left.length) continue;
+      dx = Math.max(dx, placed.right[j] + hgap - next.left[i]);
+    }
+    return (dx === -Infinity) ? 0 : dx;
+  }
+
+  // Place "next" to the LEFT of "placed", as close as possible, respecting hgap.
+  function requiredShiftLeftOf(placed, next, hgap, dy) {
+    const rowShift = Math.floor(dy / ROW_H);
+    let dx = +Infinity;
+
+    const maxRow = Math.min(placed.left.length, rowShift + next.right.length);
+    for (let j = 0; j < maxRow; j++) {
+      const i = j - rowShift;
+      if (i < 0 || i >= next.right.length) continue;
+      dx = Math.min(dx, placed.left[j] - hgap - next.right[i]);
+    }
+    return (dx === +Infinity) ? 0 : dx;
+  }
+
+  // ----------------------------
+  // Node sizing
+  // ----------------------------
+  function sizeTree(root) {
+    (function rec(n) {
+      if (n.kind === "image") {
+        n.w = n.fixed.w;
+        n.h = n.fixed.h;
+        n._lines = null;
+        n._lineH = null;
+        n._fontPx = null;
+      } else {
+        const m = measureTextBoxMultiline(n.label, n.font);
+        n.w = m.w;
+        n.h = m.h;
+        n._lines = m.lines;
+        n._lineH = m.lineH;
+        n._fontPx = m.fontPx;
+      }
+
+      if (n.fixedBox) {
+        n.w = n.fixedBox.w;
+        n.h = n.fixedBox.h;
+      }
+
+      n.children.forEach(rec);
+    })(root);
+  }
+
+  // ----------------------------
+  // Packing helpers (left / right / balanced)
+  // ----------------------------
+  function recenterGroup(children, positions) {
+    if (positions.length === 1) {
+      positions[0] = 0;
+      return positions;
+    }
+    let mn = +Infinity, mx = -Infinity;
+    for (let i = 0; i < children.length; i++) {
+      const mm = children[i].subtreeMinMax;
+      mn = Math.min(mn, positions[i] + mm.mn);
+      mx = Math.max(mx, positions[i] + mm.mx);
+    }
+    const shift = -(mn + mx) / 2;
+    for (let i = 0; i < positions.length; i++) positions[i] += shift;
+    return positions;
+  }
+
+  function packCompactLeft(children, hgap, dy) {
+    const positions = new Array(children.length).fill(0);
+    const agg = makeEmptyContour(0);
+    let started = false;
+
+    for (let k = 0; k < children.length; k++) {
+      const chC = children[k].subtreeContour;
+      let x = 0;
+
+      if (!started) {
+        started = true;
+        x = 0;
+        positions[k] = x;
+        mergeContours(agg, chC, x, dy);
+      } else {
+        x = requiredShiftRightOf(agg, chC, hgap, dy);
+        positions[k] = x;
+        mergeContours(agg, chC, x, dy);
+      }
+    }
+    return recenterGroup(children, positions);
+  }
+
+  function packCompactRight(children, hgap, dy) {
+    const n = children.length;
+    const positions = new Array(n).fill(0);
+    const agg = makeEmptyContour(0);
+
+    positions[n - 1] = 0;
+    mergeContours(agg, children[n - 1].subtreeContour, 0, dy);
+
+    for (let k = n - 2; k >= 0; k--) {
+      const chC = children[k].subtreeContour;
+      const x = requiredShiftLeftOf(agg, chC, hgap, dy);
+      positions[k] = x;
+      mergeContours(agg, chC, x, dy);
+    }
+
+    return recenterGroup(children, positions);
+  }
+
+  function isotonicRegression(targets) {
+    const blocks = [];
+    for (let i = 0; i < targets.length; i++) {
+      blocks.push({ start: i, end: i, mean: targets[i], weight: 1 });
+      while (blocks.length >= 2) {
+        const b = blocks[blocks.length - 1];
+        const a = blocks[blocks.length - 2];
+        if (a.mean <= b.mean) break;
+        const w = a.weight + b.weight;
+        const mean = (a.mean * a.weight + b.mean * b.weight) / w;
+        blocks.splice(blocks.length - 2, 2, { start: a.start, end: b.end, mean, weight: w });
+      }
+    }
+    const y = new Array(targets.length);
+    for (const b of blocks) for (let i = b.start; i <= b.end; i++) y[i] = b.mean;
+    return y;
+  }
+
+  function requiredSeparation(leftChild, rightChild, hgap, dy) {
+    const A = leftChild.subtreeContour;
+    const B = rightChild.subtreeContour;
+
+    const rowShift = Math.floor(dy / ROW_H);
+    const maxRow = Math.min(A.right.length, rowShift + B.left.length);
+
+    let need = -Infinity;
+    for (let j = 0; j < maxRow; j++) {
+      const i = j - rowShift;
+      if (i < 0 || i >= B.left.length) continue;
+      need = Math.max(need, A.right[j] + hgap - B.left[i]);
+    }
+    return (need === -Infinity) ? 0 : need;
+  }
+
+  function packBalanced(children, hgap, dy) {
+    const left = packCompactLeft(children, hgap, dy);
+    const right = packCompactRight(children, hgap, dy);
+
+    const mid = left.map((x, i) => (x + right[i]) / 2);
+
+    const sep = [];
+    for (let i = 0; i < children.length - 1; i++) {
+      sep.push(requiredSeparation(children[i], children[i + 1], hgap, dy));
+    }
+
+    const prefix = new Array(children.length).fill(0);
+    for (let i = 1; i < prefix.length; i++) prefix[i] = prefix[i - 1] + sep[i - 1];
+
+    const t = mid.map((m, i) => m - prefix[i]);
+    const y = isotonicRegression(t);
+    const x = y.map((yi, i) => yi + prefix[i]);
+
+    return recenterGroup(children, x);
+  }
+
+  // ----------------------------
+  // Layout (mode-dependent)
+  // ----------------------------
+  function layoutTree(root, vgap, hgap, mode) {
+    (function setY(n, yTop) {
+      n.y = yTop;
+      const childTop = yTop + n.h + vgap;
+      for (const ch of n.children) setY(ch, childTop);
+    })(root, 0);
+
+    function postorder(n, fn) { for (const ch of n.children) postorder(ch, fn); fn(n); }
+
+    function computePacking(n) {
+      const nodeContour = contourFromNodeBox(n.w, n.h);
+
+      if (!n.children.length) {
+        n.childOffsets = [];
+        n.subtreeContour = nodeContour;
+        n.subtreeHeight = n.h;
+        n.subtreeMinMax = contourMinMaxX(nodeContour);
+        return;
+      }
+
+      const dy = n.h + vgap;
+
+      for (const ch of n.children) {
+        if (!ch.subtreeMinMax) ch.subtreeMinMax = contourMinMaxX(ch.subtreeContour);
+      }
+
+      let x;
+      if (mode === "left") x = packCompactLeft(n.children, hgap, dy);
+      else if (mode === "right") x = packCompactRight(n.children, hgap, dy);
+      else x = packBalanced(n.children, hgap, dy);
+
+      n.childOffsets = x;
+
+      const sub = { left: [...nodeContour.left], right: [...nodeContour.right] };
+      let subtreeH = n.h;
+
+      for (let i = 0; i < n.children.length; i++) {
+        const ch = n.children[i];
+        mergeContours(sub, ch.subtreeContour, x[i], dy);
+        subtreeH = Math.max(subtreeH, dy + ch.subtreeHeight);
+      }
+
+      n.subtreeContour = { left: sub.left, right: sub.right, height: subtreeH };
+      n.subtreeHeight = subtreeH;
+      n.subtreeMinMax = contourMinMaxX(n.subtreeContour);
+    }
+
+    postorder(root, computePacking);
+
+    (function setX(n, xCenter) {
+      n.x = xCenter;
+      for (let i = 0; i < n.children.length; i++) setX(n.children[i], xCenter + n.childOffsets[i]);
+    })(root, 0);
+
+    let minX = +Infinity, maxX = -Infinity, maxY = -Infinity;
+    (function bounds(n) {
+      minX = Math.min(minX, n.x - n.w / 2);
+      maxX = Math.max(maxX, n.x + n.w / 2);
+      maxY = Math.max(maxY, n.y + n.h);
+      n.children.forEach(bounds);
+    })(root);
+
+    return { minX, maxX, maxY };
+  }
+
+  // ----------------------------
+  // Edge geometry + hit testing
+  // ----------------------------
+  function bezPoint(x1, y1, cx1, cy1, cx2, cy2, x2, y2, t) {
+    const mt = 1 - t;
+    const a = mt*mt*mt;
+    const b = 3*mt*mt*t;
+    const c = 3*mt*t*t;
+    const d = t*t*t;
+    return {
+      x: a*x1 + b*cx1 + c*cx2 + d*x2,
+      y: a*y1 + b*cy1 + c*cy2 + d*y2
+    };
+  }
+
+  function dist2PointToSegment(px, py, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay;
+    const wx = px - ax, wy = py - ay;
+    const vv = vx*vx + vy*vy;
+    if (vv === 0) {
+      const dx = px - ax, dy = py - ay;
+      return dx*dx + dy*dy;
+    }
+    let t = (wx*vx + wy*vy) / vv;
+    t = Math.max(0, Math.min(1, t));
+    const cx = ax + t*vx, cy = ay + t*vy;
+    const dx = px - cx, dy = py - cy;
+    return dx*dx + dy*dy;
+  }
+
+  function hitTestEdge(px, py, e) {
+    // Approximate curve with short segments and compute min distance.
+    let prev = bezPoint(e.x1, e.y1, e.cx1, e.cy1, e.cx2, e.cy2, e.x2, e.y2, 0);
+    let best = Infinity;
+
+    for (let i = 1; i <= EDGE_HIT_SAMPLES; i++) {
+      const t = i / EDGE_HIT_SAMPLES;
+      const cur = bezPoint(e.x1, e.y1, e.cx1, e.cy1, e.cx2, e.cy2, e.x2, e.y2, t);
+      best = Math.min(best, dist2PointToSegment(px, py, prev.x, prev.y, cur.x, cur.y));
+      prev = cur;
+    }
+    return best <= (EDGE_HIT_PAD * EDGE_HIT_PAD);
+  }
+
+  // ----------------------------
+  // Render (resize canvas to bounds; page scroll)
+  // ----------------------------
+  function drawTree(root, opts) {
+    const { vgap, hgap, showBoxes, showLinks, showContours, mode } = opts;
+
+    sizeTree(root);
+    const layout = layoutTree(root, vgap, hgap, mode);
+
+    const PAD = 40;
+    const treeW = Math.ceil((layout.maxX - layout.minX) + PAD * 2);
+    const treeH = Math.ceil(layout.maxY + PAD * 2);
+
+    const maxDim = 16000;
+    canvas.width  = Math.min(maxDim, Math.max(800, treeW));
+    canvas.height = Math.min(maxDim, Math.max(500, treeH));
+
+    const offsetX = PAD - layout.minX;
+    const offsetY = PAD;
+
+    const dark = matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+    const boxFill = dark ? "rgba(40,40,44,1)" : "rgba(250,250,252,1)";
+    const stroke  = dark ? "rgba(220,220,230,0.78)" : "rgba(40,40,50,0.78)";
+    const textFill = dark ? "rgba(245,245,250,0.96)" : "rgba(20,20,30,0.96)";
+    const imgFillDefault = dark ? "rgba(140,180,255,0.55)" : "rgba(70,130,255,0.35)";
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const tx = (x) => x + offsetX;
+    const ty = (y) => y + offsetY;
+
+    // Collect edges for hit-testing (in canvas coords)
+    const edges = [];
+    (function collectEdges(n) {
+      for (const ch of n.children) {
+        const x1 = tx(n.x), y1 = ty(n.y + n.h);
+        const x2 = tx(ch.x), y2 = ty(ch.y);
+        const midY = (y1 + y2) / 2;
+
+        edges.push({
+          parentId: n.id,
+          childId: ch.id,
+          x1, y1, x2, y2,
+          cx1: x1, cy1: midY,
+          cx2: x2, cy2: midY
+        });
+
+        collectEdges(ch);
+      }
+    })(root);
+
+    // Edges (with hover glow)
+    if (showLinks) {
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = EDGE_W;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      for (const e of edges) {
+        const hovered = HOVER_EDGE && (HOVER_EDGE.parentId === e.parentId && HOVER_EDGE.childId === e.childId);
+
+        if (hovered) {
+          ctx.save();
+          // Glow: draw a thick, blurred stroke under the main stroke
+          ctx.globalAlpha = 0.65;
+          ctx.shadowBlur = 14;
+          ctx.shadowColor = dark ? "rgba(140,200,255,0.95)" : "rgba(0,120,255,0.85)";
+          ctx.strokeStyle = dark ? "rgba(140,200,255,0.95)" : "rgba(0,120,255,0.85)";
+          ctx.lineWidth = EDGE_W + 6;
+          ctx.beginPath();
+          ctx.moveTo(e.x1, e.y1);
+          ctx.bezierCurveTo(e.cx1, e.cy1, e.cx2, e.cy2, e.x2, e.y2);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // Main edge
+        ctx.strokeStyle = dark ? "rgba(220,220,230,0.78)" : "rgba(40,40,50,0.78)";
+        ctx.beginPath();
+        ctx.moveTo(e.x1, e.y1);
+        ctx.bezierCurveTo(e.cx1, e.cy1, e.cx2, e.cy2, e.x2, e.y2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Nodes
+    (function nodes(n) {
+      const x = tx(n.x - n.w / 2), y = ty(n.y), w = n.w, h = n.h;
+
+      if (showBoxes) {
+        ctx.save();
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = boxFill;
+        roundedRectPath(x, y, w, h, RADIUS);
+        ctx.fill();
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.save();
+      if (n.kind === "image") {
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = n.color || imgFillDefault;
+        ctx.fillRect(x + 6, y + 6, w - 12, h - 12);
+      } else {
+        ctx.font = n.font;
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "center";
+        ctx.fillStyle = textFill;
+
+        const lines = n._lines || [String(n.label)];
+        const lineH = n._lineH || Math.ceil((n._fontPx || 14) * 1.25);
+        const cy = y + h / 2;
+        const total = lines.length * lineH;
+
+        for (let i = 0; i < lines.length; i++) {
+          const yy = cy - total / 2 + (i + 0.5) * lineH;
+          ctx.fillText(lines[i], tx(n.x), yy);
+        }
+      }
+      ctx.restore();
+
+      n.children.forEach(nodes);
+    })(root);
+
+    // Debug contours
+    if (showContours) {
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 1;
+      const left = root.subtreeContour.left;
+      const right = root.subtreeContour.right;
+      for (let i = 0; i < left.length; i++) {
+        if (!isFinite(left[i]) || !isFinite(right[i])) continue;
+        const yy = i * ROW_H;
+        ctx.beginPath();
+        ctx.moveTo(tx(left[i]), ty(yy));
+        ctx.lineTo(tx(right[i]), ty(yy));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Keep what we need for hit-testing without re-walking the tree
+    LAST_DRAW = { edges };
+  }
+
+  // ----------------------------
+  // Stress test cases
+  // ----------------------------
+  let ID = 0;
+  const nid = () => `n${++ID}`;
+  const T = (label, font, children = []) => ({ id: nid(), kind: "text", label, font, children });
+  const TF = (label, font, fixedW, fixedH, children = []) => ({
+    id: nid(), kind: "text", label, font, fixedBox: { w: fixedW, h: fixedH }, children
+  });
+  const I = (w, h, children = []) => ({ id: nid(), kind: "image", label: "", font: "12px system-ui", fixed: { w, h }, children });
+
+  function stress1() {
+    ID = 0;
+    return T("Root\n(very tall header)\n3 lines", "18px system-ui", [
+      T("A: Policy &\nCompliance", "15px system-ui", [
+        TF("A1", "13px system-ui", 110, 38, [
+          T("A1.a ExtremelyLongTokenWithoutSpaces_0123456789", "12px system-ui"),
+          TF("A1.b", "12px system-ui", 110, 30),
+        ]),
+        TF("A2", "13px system-ui", 110, 38, [
+          T("A2.a\nnotes\nmore notes", "12px system-ui", [
+            TF("A2.a.i", "12px system-ui", 88, 30),
+            TF("A2.a.ii", "12px system-ui", 88, 30),
+          ]),
+        ]),
+      ]),
+      T("B: Engineering", "16px system-ui", [
+        T("B1 Platform\n(3 lines)\nSLOs", "13px system-ui", [
+          TF("B1.a Build", "12px system-ui", 92, 30),
+          TF("B1.b Deploy", "12px system-ui", 92, 30),
+          TF("B1.c Observe", "12px system-ui", 92, 30),
+        ]),
+        T("B2\nDeveloper Experience", "13px system-ui", [
+          TF("B2.a IDE\nintegration", "12px system-ui", 98, 44),
+          TF("B2.b Docs", "12px system-ui", 98, 30),
+        ]),
+      ]),
+      T("C: Sales & Marketing\n(2 lines)", "15px system-ui", [
+        TF("C1 Field\nTeam", "13px system-ui", 92, 44),
+        T("C2 Growth\n+ Partnerships\n(3 lines)", "13px system-ui", [
+          TF("C2.a", "12px system-ui", 58, 30),
+          TF("C2.b", "12px system-ui", 58, 30),
+          TF("C2.c", "12px system-ui", 58, 30),
+          TF("C2.d", "12px system-ui", 58, 30),
+        ]),
+      ]),
+    ]);
+  }
+
+  function stress2() {
+    ID = 0;
+    return I(240, 100, [
+      T("Scene Graph\n(root label)\n3 lines", "15px system-ui", [
+        I(170, 150, [
+          T("Group\nalpha", "13px system-ui", [
+            I(90, 170),
+            T("Leaf\nTall\nText\n4 lines", "12px system-ui"),
+          ]),
+          I(150, 90, [
+            T("Nested\nGroup\n3 lines", "12px system-ui", [
+              I(140, 80),
+              I(70, 120),
+              TF("Wide Wide Wide", "12px system-ui", 140, 30),
+            ])
+          ])
+        ]),
+        T("UI Layer\n(2 lines)", "14px system-ui", [
+          I(210, 70),
+          T("Button\nPrimary\n(3 lines)", "12px system-ui", [
+            I(60, 60),
+            I(150, 55),
+          ]),
+        ]),
+        I(130, 230, [
+          TF("Sidebar", "12px system-ui", 120, 30),
+          TF("Footer", "12px system-ui", 120, 30),
+        ])
+      ])
+    ]);
+  }
+
+  function stress3() {
+    ID = 0;
+
+    const deep = T("Deep Chain\nStart", "15px system-ui", [
+      T("d1\n(2)", "13px system-ui", [
+        T("d2 WideWideWideWideWideWide", "12px system-ui", [
+          T("d3\n(very tall)\nline3\nline4", "12px system-ui", [
+            I(90, 180, [
+              T("d5", "12px system-ui", [
+                T("d6\n(2)", "12px system-ui", [
+                  T("d7 end", "12px system-ui"),
+                ])
+              ])
+            ])
+          ])
+        ])
+      ])
+    ]);
+
+    const fanChildren = [];
+    const widths =  [ 60, 220,  90, 280,  70, 250, 110, 300,  80, 240 ];
+    const heights = [ 50,  60, 110,  55, 140,  65,  95,  70, 160,  60 ];
+
+    for (let i = 0; i < 10; i++) {
+      const isImg = i % 2 === 0;
+      fanChildren.push(
+        isImg
+          ? I(widths[i], heights[i], [
+              TF(`thumb-${i}`, "11px system-ui", 88, 26),
+              TF(`tag-${i}`, "11px system-ui", 88, 26),
+            ])
+          : TF(`Child ${i}\nline2`, "12px system-ui", widths[i], 44, [
+              I(70 + i*3, 45 + (i % 3) * 35),
+              TF("note", "11px system-ui", 50, 26),
+            ])
+      );
+    }
+
+    const fan = T("Fan-out\n10 children", "15px system-ui", fanChildren);
+
+    return T("Root\ncomb + fan-out", "18px system-ui", [
+      deep,
+      TF("Middle\nSpacer\n(3 lines)", "14px system-ui", 150, 70, [
+        TF("m1", "12px system-ui", 70, 30),
+        TF("m2\n(2)", "12px system-ui", 70, 44),
+      ]),
+      fan
+    ]);
+  }
+
+  function getCase() {
+    const which = caseSel.value;
+    if (which === "stress1") return stress1();
+    if (which === "stress2") return stress2();
+    return stress3();
+  }
+
+  // ----------------------------
+  // Mode button wiring
+  // ----------------------------
+  function setMode(mode) {
+    MODE = mode;
+    btnLeft.setAttribute("aria-pressed", mode === "left");
+    btnBalanced.setAttribute("aria-pressed", mode === "balanced");
+    btnRight.setAttribute("aria-pressed", mode === "right");
+    render();
+  }
+
+  btnLeft.addEventListener("click", () => setMode("left"));
+  btnBalanced.addEventListener("click", () => setMode("balanced"));
+  btnRight.addEventListener("click", () => setMode("right"));
+
+  // ----------------------------
+  // Hover detection for edges
+  // ----------------------------
+  function canvasPointFromEvent(ev) {
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) * (canvas.width / r.width);
+    const y = (ev.clientY - r.top) * (canvas.height / r.height);
+    return { x, y };
+  }
+
+  function setHoverEdge(edgeOrNull) {
+    const same =
+      (!HOVER_EDGE && !edgeOrNull) ||
+      (HOVER_EDGE && edgeOrNull &&
+        HOVER_EDGE.parentId === edgeOrNull.parentId &&
+        HOVER_EDGE.childId === edgeOrNull.childId);
+
+    if (same) return;
+    HOVER_EDGE = edgeOrNull;
+    render(); // redraw with glow
+  }
+
+  canvas.addEventListener("mousemove", (ev) => {
+    if (!LAST_DRAW || !LAST_DRAW.edges) return;
+
+    const { x, y } = canvasPointFromEvent(ev);
+
+    // Prefer the closest edge under the cursor
+    let best = null;
+    for (const e of LAST_DRAW.edges) {
+      if (hitTestEdge(x, y, e)) { best = e; break; }
+    }
+
+    if (best) {
+      canvas.style.cursor = "pointer";
+      setHoverEdge({ parentId: best.parentId, childId: best.childId });
+    } else {
+      canvas.style.cursor = "default";
+      setHoverEdge(null);
+    }
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    canvas.style.cursor = "default";
+    setHoverEdge(null);
+  });
+
+  // ----------------------------
+  // Render
+  // ----------------------------
+  function render() {
+    const vgap = +vgapEl.value;
+    const hgap = +hgapEl.value;
+
+    vgapVal.textContent = `${vgap}px`;
+    hgapVal.textContent = `${hgap}px`;
+
+    const showBoxes = showBoxesEl.checked;
+    const showLinks = showLinksEl.checked;
+    const showContours = showContoursEl.checked;
+
+    const root = getCase();
+    drawTree(root, { vgap, hgap, showBoxes, showLinks, showContours, mode: MODE });
+  }
+
+  [caseSel, vgapEl, hgapEl, showBoxesEl, showLinksEl, showContoursEl].forEach(el => {
+    el.addEventListener("input", render);
+  });
+  if (matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+
+  render();
+})();
+</script>
+</body>
+</html>

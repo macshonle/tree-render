@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>General Tree Visualization</title>
+  <style>
+    body {
+      font-family: 'Roboto', sans-serif;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background-color: #f4f4f4;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+
+    p {
+      color: #555;
+      margin-top: 0;
+      text-align: center;
+      margin-bottom: 20px;
+      max-width: 700px;
+    }
+
+    #controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 15px;
+      margin-bottom: 20px;
+      background-color: #fff;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .control-group {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .control-group label {
+      font-weight: 500;
+      color: #333;
+      margin-right: 5px;
+    }
+
+    .control-group input[type="radio"] {
+      margin-right: 3px;
+    }
+
+    .control-group span {
+      margin-right: 10px;
+    }
+
+    #treeCanvas {
+      border: 1px solid #ccc;
+      background-color: #fff;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+      border-radius: 8px;
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    .button-container {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .tree-button {
+      padding: 10px 15px;
+      border: none;
+      border-radius: 5px;
+      background-color: #007bff;
+      color: white;
+      font-size: 1em;
+      cursor: pointer;
+      transition: background-color 0.3s ease, box-shadow 0.3s ease;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .tree-button:hover {
+      background-color: #0056b3;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .tree-button.active {
+      background-color: #004085;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    #message-box {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: #d4edda;
+      color: #155724;
+      padding: 15px 20px;
+      border: 1px solid #c3e6cb;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      font-size: 1em;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s ease-in-out, top 0.3s ease-in-out;
+      pointer-events: none;
+    }
+
+    #message-box.show {
+      opacity: 1;
+      top: 30px;
+    }
+
+    #message-box.error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border-color: #f5c6cb;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>General Tree Visualization</h1>
+  <p>Select a tree example to visualize the tree structure using the Max Width layout algorithm.</p>
+
+  <div id="controls">
+    <div class="control-group button-container">
+      <button class="tree-button" data-tree="tree1">Example Tree 1</button>
+      <button class="tree-button" data-tree="tree2">Example Tree 2</button>
+      <button class="tree-button" data-tree="tree3">Example Tree 3 (Binary)</button>
+      <button class="tree-button" data-tree="tree4">Large Tree</button>
+      <button class="tree-button" data-tree="tree5">Balanced Tree</button>
+    </div>
+  </div>
+
+  <canvas id="treeCanvas" width="1000" height="700"></canvas>
+  <div id="message-box"></div>
+
+  <script>
+    const canvas = document.getElementById('treeCanvas');
+    const ctx = canvas.getContext('2d');
+    const treeButtons = document.querySelectorAll('.tree-button');
+    // Removed layoutRadios reference
+    const messageBox = document.getElementById('message-box');
+
+    let activeTreeName = null;
+    let currentTreeData = null; // Stores the raw tree structure (will be cloned for layout)
+
+    // --- Constants ---
+    const HORIZONTAL_PADDING = 30; // Horizontal space between sibling nodes/slots
+    const VERTICAL_PADDING = 30; // Vertical space between parent/child levels
+    const NODE_HEIGHT = 28;
+    const MIN_NODE_WIDTH = 60; // *** Added Minimum Node Width ***
+    const NODE_FONT = '14px sans-serif';
+    const NODE_FILL_COLOR = '#a5d6a7';
+    const NODE_STROKE_COLOR = '#388e3c';
+    const EDGE_COLOR = '#66bb6a';
+    const NODE_BORDER_RADIUS = 8;
+
+    // --- Helper Functions ---
+
+    function showMessage(message, type = 'success') {
+      messageBox.textContent = message;
+      messageBox.className = 'message-box show';
+      if (type === 'error') {
+        messageBox.classList.add('error');
+      }
+      setTimeout(() => {
+        messageBox.className = 'message-box';
+      }, 3000);
+    }
+
+    function getTextWidth(text, font = NODE_FONT) {
+      ctx.font = font;
+      // console.log(`Width for "${text}": ${ctx.measureText(text).width}`); // Debugging log
+      return ctx.measureText(text).width;
+    }
+
+    function drawNode(x, y, width, label) {
+      // Use the width calculated during initializeTree (which includes min width)
+      const finalWidth = width; // Width is already finalized
+
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(x - finalWidth / 2, y - NODE_HEIGHT / 2, finalWidth, NODE_HEIGHT, NODE_BORDER_RADIUS);
+      } else {
+        ctx.rect(x - finalWidth / 2, y - NODE_HEIGHT / 2, finalWidth, NODE_HEIGHT);
+      }
+      ctx.fillStyle = NODE_FILL_COLOR;
+      ctx.fill();
+      ctx.strokeStyle = NODE_STROKE_COLOR;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.font = NODE_FONT;
+      ctx.fillStyle = '#111';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x, y);
+    }
+
+    function drawEdge(startX, startY, endX, endY) {
+      ctx.beginPath();
+      ctx.moveTo(startX, startY + NODE_HEIGHT / 2);
+      ctx.lineTo(endX, endY - NODE_HEIGHT / 2);
+      ctx.strokeStyle = EDGE_COLOR;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // --- Tree Data Structure ---
+
+    function createTreeNode(label, children = []) {
+      return {
+        label,
+        children,
+        x: 0, y: 0, width: 0, height: NODE_HEIGHT,
+        level: 0, parent: null
+      };
+    }
+
+    // --- Layout Algorithms ---
+
+    /**
+    * Sets initial Y coordinates, parent references, and calculates node widths (incl. min width).
+    * @param {Object} node - The current node.
+    * @param {number} startY - The base Y coordinate for the root level.
+    * @param {number} level - The current depth level (0 for root).
+    * @param {Object|null} parent - The parent node reference.
+    */
+    function initializeTree(node, startY, level = 0, parent = null) {
+      node.y = startY + level * (NODE_HEIGHT + VERTICAL_PADDING);
+      node.level = level;
+      node.parent = parent;
+      // Calculate width based on label + padding, enforcing minimum width
+      const calculatedWidth = getTextWidth(node.label, NODE_FONT) + 20; // Add padding
+      node.width = Math.max(MIN_NODE_WIDTH, calculatedWidth); // *** Enforce Min Width ***
+      // console.log(`Node: ${node.label}, Level: ${level}, Width: ${node.width}`); // Debug log
+      node.children.forEach(child => initializeTree(child, startY, level + 1, node));
+    }
+
+    /**
+    * Calculates layout using the Max Width method (Recursive part).
+    * @param {Object} node - The root node of the subtree to layout.
+    * @param {number} currentX - The X coordinate for the center of the current node.
+    * @param {Object} levelMaxWidths - An object mapping level number to max width at that level.
+    */
+    function maxWidthLayoutRecursive(node, currentX, levelMaxWidths) {
+      // console.log(`Layout Node: ${node.label} at x=${currentX}`); // Debug log
+      node.x = currentX; // Position the current node
+
+      if (node.children.length > 0) {
+        const childLevel = node.level + 1;
+        // Use the pre-calculated max width for the children's level
+        // Fallback to MIN_NODE_WIDTH if level somehow not found (safer)
+        const childSlotWidth = levelMaxWidths[childLevel] || MIN_NODE_WIDTH;
+
+        const totalChildrenSlotWidth = node.children.length * childSlotWidth + Math.max(0, node.children.length - 1) * HORIZONTAL_PADDING;
+        let childCenterX = currentX - totalChildrenSlotWidth / 2 + childSlotWidth / 2;
+
+        node.children.forEach(child => {
+          maxWidthLayoutRecursive(child, childCenterX, levelMaxWidths);
+          childCenterX += childSlotWidth + HORIZONTAL_PADDING;
+        });
+      }
+    }
+
+    /**
+    * Main function for Max Width layout.
+    * @param {Object} node - The root node of the entire tree.
+    * @param {number} startX - The desired center X coordinate for the root.
+    */
+    function maxWidthLayout(node, startX) {
+      // 1. Find max width at each level (using widths set in initializeTree)
+      const levelMaxWidths = {};
+      function findMaxWidths(n) { // Use different param name
+        levelMaxWidths[n.level] = Math.max(levelMaxWidths[n.level] || 0, n.width);
+        n.children.forEach(findMaxWidths);
+      }
+      findMaxWidths(node); // Populate levelMaxWidths
+      // console.log("Level Max Widths:", levelMaxWidths); // Debug log
+
+      // 2. Position nodes recursively using the calculated max widths
+      maxWidthLayoutRecursive(node, startX, levelMaxWidths);
+
+      // 3. Center the entire tree based on final bounds
+      centerTree(node, startX);
+    }
+
+    // --- Removed Level Depth Layout Functions ---
+
+    /**
+    * Centers the tree horizontally based on its calculated bounds.
+    * @param {Object} node - The root node.
+    * @param {number} desiredCenterX - The target center X coordinate.
+    */
+    function centerTree(node, desiredCenterX) {
+      const bounds = { minX: Infinity, maxX: -Infinity };
+      function findBounds(currentNode) {
+        if (!currentNode) return;
+        // Use node's actual width for bounds calculation
+        const nodeLeft = currentNode.x - currentNode.width / 2;
+        const nodeRight = currentNode.x + currentNode.width / 2;
+        bounds.minX = Math.min(bounds.minX, nodeLeft);
+        bounds.maxX = Math.max(bounds.maxX, nodeRight);
+        currentNode.children.forEach(findBounds);
+      }
+      if (!node) return;
+      findBounds(node);
+
+      const treeWidth = bounds.maxX - bounds.minX;
+      if (treeWidth > 0 && isFinite(bounds.minX) && isFinite(bounds.maxX)) {
+        const currentCenterX = bounds.minX + treeWidth / 2;
+        const xOffset = desiredCenterX - currentCenterX;
+
+        function applyOffset(currentNode, offset) {
+          if (!currentNode) return;
+          currentNode.x += offset;
+          currentNode.children.forEach(child => applyOffset(child, offset));
+        }
+        applyOffset(node, xOffset);
+      } else if (node && !node.children.length && isFinite(node.x)) {
+        const xOffset = desiredCenterX - node.x;
+        node.x += xOffset;
+      }
+    }
+
+
+    // --- Tree Drawing ---
+
+    /**
+    * Draws the entire tree structure recursively.
+    * @param {Object} node - The root node of the tree/subtree to draw.
+    */
+    function drawTree(node) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!node) return;
+
+      function drawRecursive(currentNode) {
+        // console.log(`Drawing Node: ${currentNode.label} at (${currentNode.x}, ${currentNode.y}) width=${currentNode.width}`); // Debug log
+        // Draw edges to children first
+        currentNode.children.forEach(child => {
+          if (isFinite(currentNode.x) && isFinite(currentNode.y) && isFinite(child.x) && isFinite(child.y)) {
+            drawEdge(currentNode.x, currentNode.y, child.x, child.y);
+          } else {
+            // console.warn(`Skipping edge draw for child ${child.label} due to invalid coords`);
+          }
+          drawRecursive(child); // Recurse
+        });
+        // Draw the node itself (on top of edges)
+        if (isFinite(currentNode.x) && isFinite(currentNode.y)) {
+          // Pass the node's calculated width (which includes min width)
+          drawNode(currentNode.x, currentNode.y, currentNode.width, currentNode.label);
+        } else {
+          // console.warn(`Skipping node draw for ${currentNode.label} due to invalid coords`);
+        }
+      }
+
+      drawRecursive(node);
+    }
+
+    // --- Tree Definitions ---
+
+    const treeDefs = {
+      tree1: () => createTreeNode('A', [
+        createTreeNode('B', [
+          createTreeNode('D'),
+          createTreeNode('E', [createTreeNode('H'), createTreeNode('I')]),
+        ]),
+        createTreeNode('C', [
+          createTreeNode('F', [createTreeNode('J')]),
+          createTreeNode('G'),
+        ]),
+      ]),
+      tree2: () => createTreeNode('Root', [
+        createTreeNode('Branch1', [
+          createTreeNode('Leaf1'),
+          createTreeNode('Leaf2'),
+          createTreeNode('Leaf3'),
+        ]),
+        createTreeNode('Branch2', [
+          createTreeNode('SubBranch1', [
+            createTreeNode('SubLeaf1'),
+            createTreeNode('SubLeaf2'),
+          ]),
+          createTreeNode('SubBranch2'),
+        ]),
+        createTreeNode('Branch3', [
+          createTreeNode('End1'),
+          createTreeNode('End2'),
+          createTreeNode('End3'),
+          createTreeNode('End4'),
+        ]),
+      ]),
+      tree3: () => createTreeNode('A', [ // Binary Tree Example
+        createTreeNode('B', [
+          createTreeNode('D'),
+          createTreeNode('E'), // Node 'E' definition is correct
+        ]),
+        createTreeNode('C', [
+          createTreeNode('F'),
+          createTreeNode('G'),
+        ]),
+      ]),
+      tree4: () => createTreeNode('Long Root Label', [
+        createTreeNode('Branch B', [
+          createTreeNode('Depth D', [
+            createTreeNode('H'),
+            createTreeNode('Item I', [
+              createTreeNode('P'),
+              createTreeNode('Q'),
+            ]),
+          ]),
+          createTreeNode('Element E', [
+            createTreeNode('J'),
+            createTreeNode('K'),
+          ]),
+        ]),
+        createTreeNode('Category C', [
+          createTreeNode('Factor F', [
+            createTreeNode('L'),
+            createTreeNode('Much Longer Label M'),
+          ]),
+          createTreeNode('Group G', [
+            createTreeNode('N'),
+            createTreeNode('O'),
+          ]),
+        ]),
+      ]),
+      tree5: () => createTreeNode("1", [
+        createTreeNode("2", [
+          createTreeNode("4"),
+          createTreeNode("5", [
+            createTreeNode("8"),
+            createTreeNode("9")
+          ])
+        ]),
+        createTreeNode("3", [
+          createTreeNode("6"),
+          createTreeNode("7", [
+            createTreeNode("10"),
+            createTreeNode("11")
+          ])
+        ])
+      ]),
+    };
+
+
+    // --- Event Handlers ---
+
+    /**
+    * Applies the Max Width layout and redraws the tree.
+    */
+    function applyLayoutAndDraw() {
+      if (!currentTreeData) {
+        return;
+      }
+
+      // const selectedLayout = document.querySelector('input[name="layout"]:checked').value; // Only one layout now
+      const rootNode = JSON.parse(JSON.stringify(currentTreeData)); // Clone
+      const startX = canvas.width / 2;
+      const startY = VERTICAL_PADDING + NODE_HEIGHT / 2;
+
+      try {
+        // 1. Initialize tree (sets Y, parent refs, calculates widths incl. min)
+        initializeTree(rootNode, startY);
+
+        // 2. Apply Max Width layout algorithm (calculates X)
+        maxWidthLayout(rootNode, startX);
+        const layoutName = "Max Width"; // Only option
+
+        // 3. Draw the tree
+        drawTree(rootNode);
+
+        showMessage(`Tree "${activeTreeName}" displayed using ${layoutName} Layout.`, 'success');
+
+      } catch (error) {
+        console.error("Error during layout/drawing:", error);
+        showMessage(`Error displaying tree: ${error.message}`, 'error');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    /**
+    * Handles clicks on the tree selection buttons.
+    */
+    function handleTreeSelect(event) {
+      const treeName = event.target.dataset.tree;
+      const treeConstructor = treeDefs[treeName];
+
+      if (treeConstructor) {
+        treeButtons.forEach(button => button.classList.remove('active'));
+        event.target.classList.add('active');
+        activeTreeName = treeName;
+        currentTreeData = treeConstructor(); // Store raw structure
+        applyLayoutAndDraw(); // Apply layout and draw
+      } else {
+        showMessage(`Tree definition for "${treeName}" not found.`, 'error');
+        currentTreeData = null;
+        activeTreeName = null;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    // --- Initialization ---
+
+    // Attach event listeners
+    treeButtons.forEach(button => {
+      button.addEventListener('click', handleTreeSelect);
+    });
+    // Removed listener attachment for layoutRadios
+
+    // Initialize with default tree ('tree1') using Max Width layout
+    const defaultTreeButton = document.querySelector('[data-tree="tree1"]');
+
+    if (defaultTreeButton) {
+      activeTreeName = 'tree1';
+      currentTreeData = treeDefs[activeTreeName]();
+      defaultTreeButton.classList.add('active');
+      applyLayoutAndDraw(); // Draw the initial tree
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      showMessage("Default tree not found. Please select.", "error");
+    }
+  </script>
+</body>
+
+</html>
