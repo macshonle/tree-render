@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useTheme } from 'vuetify'
 import StylePanel from './components/StylePanel.vue'
 import TreeViewCanvas from './components/TreeViewCanvas.vue'
@@ -12,19 +12,50 @@ const { examples, selectedExample, selectExample } = useTreeExamples()
 
 const fileInput = ref<HTMLInputElement | null>(null)
 
-// System theme detection
-function updateTheme() {
-  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  theme.change(isDark ? 'dark' : 'light')
+// Theme mode: 'system' | 'light' | 'dark'
+const themeMode = ref<'system' | 'light' | 'dark'>('system')
+
+// Icon for current theme mode
+const themeIcon = computed(() => {
+  switch (themeMode.value) {
+    case 'light': return 'mdi-weather-sunny'
+    case 'dark': return 'mdi-weather-night'
+    default: return 'mdi-theme-light-dark'
+  }
+})
+
+// Apply theme based on mode
+function applyTheme() {
+  if (themeMode.value === 'system') {
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    theme.change(isDark ? 'dark' : 'light')
+  } else {
+    theme.change(themeMode.value)
+  }
+}
+
+// Cycle through theme modes
+function cycleTheme() {
+  const modes: Array<'system' | 'light' | 'dark'> = ['system', 'light', 'dark']
+  const currentIndex = modes.indexOf(themeMode.value)
+  themeMode.value = modes[(currentIndex + 1) % modes.length]
+  applyTheme()
+}
+
+// Handle system theme changes
+function handleSystemThemeChange() {
+  if (themeMode.value === 'system') {
+    applyTheme()
+  }
 }
 
 onMounted(() => {
-  updateTheme()
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateTheme)
+  applyTheme()
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', handleSystemThemeChange)
 })
 
 onUnmounted(() => {
-  window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', updateTheme)
+  window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', handleSystemThemeChange)
 })
 
 function handleImport() {
@@ -63,6 +94,20 @@ async function handleFileSelect(event: Event) {
           style="max-width: 200px"
         />
         <v-spacer />
+        <!-- Theme toggle -->
+        <v-btn
+          variant="text"
+          size="small"
+          class="mr-2"
+          @click="cycleTheme"
+        >
+          <v-icon start>{{ themeIcon }}</v-icon>
+          {{ themeMode === 'system' ? 'System' : themeMode === 'light' ? 'Light' : 'Dark' }}
+          <v-tooltip activator="parent" location="bottom">
+            Click to cycle: System → Light → Dark
+          </v-tooltip>
+        </v-btn>
+        <v-divider vertical class="mr-2" />
         <v-btn
           variant="outlined"
           size="small"

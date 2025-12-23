@@ -77,7 +77,7 @@ const nodePadding = computed({
             v-model="nodeShape"
             mandatory
             density="compact"
-            class="mb-4"
+            class="mb-3"
           >
             <v-btn
               v-for="shape in nodeShapeOptions"
@@ -131,7 +131,7 @@ const nodePadding = computed({
             v-model="edgeStyle"
             mandatory
             density="compact"
-            class="mb-4"
+            class="mb-3"
           >
             <v-btn
               v-for="style in edgeStyleOptions"

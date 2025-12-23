@@ -9,15 +9,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "^5.2.8",
+    "@mdi/font": "^7.4.47",
     "vue": "^3.5.13",
-    "vuetify": "^3.7.5",
-    "@mdi/font": "^7.4.47"
+    "vuetify": "^3.7.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
+    "sass": "^1.83.0",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
-    "vue-tsc": "^2.2.0",
-    "sass": "^1.83.0"
+    "vue-tsc": "^2.2.0"
   }
 }

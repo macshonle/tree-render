@@ -33,7 +33,7 @@ export const defaultTreeStyle: TreeStyle = {
     fillColor: '#ffffff',
     strokeColor: '#333333',
     strokeWidth: 2,
-    padding: 12
+    padding: 10
   },
   edge: {
     style: 'org-chart',
@@ -42,8 +42,8 @@ export const defaultTreeStyle: TreeStyle = {
     arrowSize: 8
   },
   layout: {
-    horizontalGap: 40,
-    verticalGap: 60,
+    horizontalGap: 10,
+    verticalGap: 40,
     lineSpacing: 20
   }
 }

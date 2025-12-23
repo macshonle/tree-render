@@ -4,6 +4,7 @@ import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import 'vuetify/styles'
 import '@mdi/font/css/materialdesignicons.css'
+import '@fontsource-variable/ibm-plex-sans'
 import App from './App.vue'
 import './styles/main.scss'
 
@@ -16,43 +17,47 @@ const vuetify = createVuetify({
       light: {
         dark: false,
         colors: {
-          background: '#f5f5f5',
-          surface: '#e0e0e0',
-          'surface-variant': '#d0d0d0',
-          primary: '#616161',
-          secondary: '#9e9e9e',
-          accent: '#757575',
+          background: '#f8f8f8',
+          surface: '#eeeeee',
+          'surface-variant': '#e0e0e0',
+          primary: '#5c6bc0', // Subtle indigo accent
+          secondary: '#78909c',
+          accent: '#7986cb',
+          'on-surface': '#1a1a1a',
         }
       },
       dark: {
         dark: true,
         colors: {
-          background: '#1a1a1a',
-          surface: '#2d2d2d',
-          'surface-variant': '#3d3d3d',
-          primary: '#9e9e9e',
-          secondary: '#757575',
-          accent: '#bdbdbd',
+          background: '#18181b',
+          surface: '#27272a',
+          'surface-variant': '#3f3f46',
+          primary: '#818cf8', // Indigo for dark mode
+          secondary: '#94a3b8',
+          accent: '#a5b4fc',
+          'on-surface': '#fafafa',
         }
       },
       system: {
         dark: window.matchMedia('(prefers-color-scheme: dark)').matches,
         colors: window.matchMedia('(prefers-color-scheme: dark)').matches
           ? {
-              background: '#1a1a1a',
-              surface: '#2d2d2d',
-              'surface-variant': '#3d3d3d',
-              primary: '#9e9e9e',
-              secondary: '#757575',
-              accent: '#bdbdbd',
+              background: '#18181b',
+              surface: '#27272a',
+              'surface-variant': '#3f3f46',
+              primary: '#818cf8',
+              secondary: '#94a3b8',
+              accent: '#a5b4fc',
+              'on-surface': '#fafafa',
             }
           : {
-              background: '#f5f5f5',
-              surface: '#e0e0e0',
-              'surface-variant': '#d0d0d0',
-              primary: '#616161',
-              secondary: '#9e9e9e',
-              accent: '#757575',
+              background: '#f8f8f8',
+              surface: '#eeeeee',
+              'surface-variant': '#e0e0e0',
+              primary: '#5c6bc0',
+              secondary: '#78909c',
+              accent: '#7986cb',
+              'on-surface': '#1a1a1a',
             }
       }
     }

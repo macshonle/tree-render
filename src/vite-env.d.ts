@@ -10,3 +10,5 @@ declare module 'vuetify/styles' {
   const styles: string
   export default styles
 }
+
+declare module '@fontsource-variable/ibm-plex-sans'
