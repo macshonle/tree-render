@@ -31,13 +31,13 @@ export const defaultTreeStyle: TreeStyle = {
   node: {
     shape: 'rounded-rectangle',
     fillColor: '#ffffff',
-    strokeColor: '#333333',
+    strokeColor: '#111111',
     strokeWidth: 2,
     padding: 10
   },
   edge: {
     style: 'org-chart',
-    color: '#666666',
+    color: '#000000',
     width: 2,
     arrowSize: 8
   },
@@ -58,7 +58,12 @@ export interface TreeNode {
 // Sizing mode for tree examples
 export type SizingMode = 'fit-content' | 'fixed'
 
-// Tree example with metadata and sizing configuration
+// Deep partial type for nested style overrides
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P]
+}
+
+// Tree example with metadata, sizing configuration, and optional style overrides
 export interface TreeExample {
   id: string
   name: string
@@ -66,6 +71,7 @@ export interface TreeExample {
   nodeWidth?: number   // For 'fixed' mode
   nodeHeight?: number  // For 'fixed' mode
   root: TreeNode
+  style?: DeepPartial<TreeStyle>  // Example-specific style overrides
 }
 
 // Style preset for import/export

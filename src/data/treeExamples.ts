@@ -229,38 +229,58 @@ export const treeExamples: TreeExample[] = [
   // Org chart style (fit-content)
   {
     id: 'org-chart-departments',
-    name: 'Org Chart - Departments',
+    name: 'Departments',
     sizingMode: 'fit-content',
     root: orgChartDepartments(),
+    style: {
+      node: { shape: 'rounded-rectangle' },
+      edge: { style: 'org-chart' },
+    },
   },
   {
     id: 'org-chart-media',
-    name: 'Org Chart - Media',
+    name: 'Media',
     sizingMode: 'fit-content',
     root: orgChartMedia(),
+    style: {
+      node: { shape: 'rounded-rectangle' },
+      edge: { style: 'curve' },
+    },
   },
   {
     id: 'org-chart-wide',
-    name: 'Org Chart - Wide',
+    name: 'Wide and Deep',
     sizingMode: 'fit-content',
     root: orgChartWide(),
+    style: {
+      node: { shape: 'rounded-rectangle' },
+      edge: { style: 'straight-arrow' },
+    },
   },
   // CS textbook style (fixed circular nodes)
   {
     id: 'binary-tree',
-    name: 'Binary Tree (Numbered)',
+    name: 'Binary Tree',
     sizingMode: 'fixed',
     nodeWidth: 40,
     nodeHeight: 40,
     root: binaryTreeNumbered(),
+    style: {
+      node: { shape: 'circle' },
+      edge: { style: 'straight-arrow' },
+    },
   },
   {
     id: 'nary-tree',
-    name: 'N-ary Tree (Letters)',
+    name: 'General Tree',
     sizingMode: 'fixed',
     nodeWidth: 40,
     nodeHeight: 40,
     root: naryTreeLetters(),
+    style: {
+      node: { shape: 'ellipse' },
+      edge: { style: 'straight-arrow' },
+    },
   },
   {
     id: 'file-system',
@@ -269,6 +289,10 @@ export const treeExamples: TreeExample[] = [
     nodeWidth: 80,
     nodeHeight: 28,
     root: fileSystemTree(),
+    style: {
+      node: { shape: 'rectangle' },
+      edge: { style: 'org-chart' },
+    },
   },
   // General trees (fixed rectangles)
   {
@@ -278,13 +302,19 @@ export const treeExamples: TreeExample[] = [
     nodeWidth: 60,
     nodeHeight: 28,
     root: simpleTree(),
+    style: {
+      node: { shape: 'rounded-rectangle' },
+      edge: { style: 'straight-arrow' },
+    },
   },
   {
     id: 'deep-tree',
     name: 'Deep Tree',
-    sizingMode: 'fixed',
-    nodeWidth: 100,
-    nodeHeight: 28,
+    sizingMode: 'fit-content',
     root: deepTree(),
+    style: {
+      node: { shape: 'rounded-rectangle' },
+      edge: { style: 'org-chart' },
+    },
   },
 ]

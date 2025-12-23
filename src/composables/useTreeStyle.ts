@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { type TreeStyle, type StylePreset, defaultTreeStyle } from '@/types'
+import { type TreeStyle, type StylePreset, type DeepPartial, defaultTreeStyle } from '@/types'
 
 // Reactive tree style state
 const treeStyle = ref<TreeStyle>(structuredClone(defaultTreeStyle))
@@ -8,6 +8,27 @@ export function useTreeStyle() {
   // Reset to default style
   function resetStyle() {
     treeStyle.value = structuredClone(defaultTreeStyle)
+  }
+
+  // Apply example-specific style overrides (merged with defaults)
+  function applyExampleStyle(styleOverrides?: DeepPartial<TreeStyle>) {
+    // Start with a fresh copy of defaults
+    const newStyle = structuredClone(defaultTreeStyle)
+
+    // Merge in the example-specific overrides
+    if (styleOverrides) {
+      if (styleOverrides.node) {
+        Object.assign(newStyle.node, styleOverrides.node)
+      }
+      if (styleOverrides.edge) {
+        Object.assign(newStyle.edge, styleOverrides.edge)
+      }
+      if (styleOverrides.layout) {
+        Object.assign(newStyle.layout, styleOverrides.layout)
+      }
+    }
+
+    treeStyle.value = newStyle
   }
 
   // Export current style as JSON
@@ -61,6 +82,7 @@ export function useTreeStyle() {
   return {
     treeStyle,
     resetStyle,
+    applyExampleStyle,
     exportStyle,
     importStyle,
     downloadStyle,
