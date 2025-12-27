@@ -136,7 +136,10 @@ export function mergeContours(
   dy: number,
   rowStep: number = DEFAULT_CONTOUR_ROW_STEP
 ): void {
-  const rowShift = Math.floor(dy / rowStep)
+  // Use round instead of floor to center error around 0 (±rowStep/2)
+  // rather than always positive (0 to rowStep-1). This prevents
+  // systematic error accumulation across tree levels.
+  const rowShift = Math.round(dy / rowStep)
   const needRows = Math.max(dst.left.length, rowShift + src.left.length)
 
   // Expand destination arrays if needed
@@ -168,7 +171,8 @@ export function translateContour(
   dy: number,
   rowStep: number = DEFAULT_CONTOUR_ROW_STEP
 ): SkylineContour {
-  const rowShift = Math.floor(dy / rowStep)
+  // Use round instead of floor for consistency with mergeContours
+  const rowShift = Math.round(dy / rowStep)
   const newRows = Math.max(0, rowShift + contour.left.length)
 
   const result: SkylineContour = {

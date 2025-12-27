@@ -101,7 +101,11 @@ export const maxwidthLayout: LayoutAlgorithm = (
     childBoundsList.push(translateBounds(childBounds, childOffsetX, childOffsetY))
 
     // Merge child contour into subtree contour
-    mergeContours(subtreeContour, childLayout.contour, childOffsetX, childOffsetY, contourRowStep)
+    // Contours are indexed from the TOP of the node, not the center.
+    // childOffsetY is center-to-center, but we need top-to-top for contour merging:
+    // contourDy = (childTop) - (parentTop) = (childOffsetY - childHeight/2) - (-parentHeight/2)
+    const contourDy = childOffsetY - childLayout.root.height / 2 + nodeSize.height / 2
+    mergeContours(subtreeContour, childLayout.contour, childOffsetX, contourDy, contourRowStep)
 
     currentX += childWidth + horizontalGap
   }
