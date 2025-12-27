@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { mdiPlus, mdiMinus } from '@mdi/js'
 import type { TreeStyle, TreeExample, TreeNode } from '@/types'
 
 const props = defineProps<{
@@ -472,13 +473,13 @@ onUnmounted(() => {
     <div class="zoom-controls">
       <v-btn-group density="compact" variant="outlined">
         <v-btn size="small" @click="zoom = Math.min(4, zoom * 1.2); draw()">
-          <v-icon>mdi-plus</v-icon>
+          <v-icon :icon="mdiPlus" />
         </v-btn>
         <v-btn size="small" @click="resetView">
           <span class="text-caption">{{ Math.round(zoom * 100) }}%</span>
         </v-btn>
         <v-btn size="small" @click="zoom = Math.max(0.25, zoom * 0.8); draw()">
-          <v-icon>mdi-minus</v-icon>
+          <v-icon :icon="mdiMinus" />
         </v-btn>
       </v-btn-group>
     </div>

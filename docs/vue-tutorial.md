@@ -12,7 +12,8 @@ This document explains Vue 3 concepts as they are used in the Tree Render applic
 6. [Composables (Shared State)](#composables-shared-state)
 7. [Lifecycle Hooks](#lifecycle-hooks)
 8. [Vuetify Integration](#vuetify-integration)
-9. [TypeScript Integration](#typescript-integration)
+9. [Bundle Optimization](#bundle-optimization)
+10. [TypeScript Integration](#typescript-integration)
 
 ---
 
@@ -324,13 +325,15 @@ Vuetify is a Material Design component library for Vue.
 ```typescript
 import { createApp } from 'vue'
 import { createVuetify } from 'vuetify'
-import * as components from 'vuetify/components'
-import * as directives from 'vuetify/directives'
+import { aliases, mdi } from 'vuetify/iconsets/mdi-svg'
 import 'vuetify/styles'
 
 const vuetify = createVuetify({
-  components,
-  directives,
+  icons: {
+    defaultSet: 'mdi',
+    aliases,
+    sets: { mdi },
+  },
   theme: {
     defaultTheme: 'light',
     themes: {
@@ -344,6 +347,8 @@ const app = createApp(App)
 app.use(vuetify)
 app.mount('#app')
 ```
+
+Note: We use `vuetify/iconsets/mdi-svg` instead of `@mdi/font` for tree-shakeable SVG icons. See [Bundle Optimization](#bundle-optimization) for details.
 
 ### Using Theme Colors
 
@@ -374,6 +379,89 @@ theme.global.name.value = 'dark'
 - `v-slider` - Range input
 - `v-sheet` - Container with theme support
 - `v-icon` - Material Design icons
+
+---
+
+## Bundle Optimization
+
+Optimizing bundle size is crucial for fast page loads. This project demonstrates several best practices.
+
+### Tree-Shakeable Icons with @mdi/js
+
+**Problem**: The `@mdi/font` package loads all 7,000+ Material Design Icons as a web font (~1.3 MB), even if you only use a few icons.
+
+**Solution**: Use `@mdi/js` which exports each icon as a tree-shakeable SVG path string. Only the icons you import are included in the bundle.
+
+```typescript
+// ❌ Bad: Loads entire icon font
+import '@mdi/font/css/materialdesignicons.css'
+
+// ✅ Good: Only imports specific icons (~200 bytes each)
+import { mdiWeatherSunny, mdiImport, mdiExport } from '@mdi/js'
+```
+
+**Using icons in templates:**
+
+```vue
+<script setup lang="ts">
+import { mdiWeatherSunny } from '@mdi/js'
+</script>
+
+<template>
+  <!-- Use :icon prop with the imported constant -->
+  <v-icon :icon="mdiWeatherSunny" />
+</template>
+```
+
+**Configuring Vuetify for SVG icons:**
+
+```typescript
+// main.ts
+import { aliases, mdi } from 'vuetify/iconsets/mdi-svg'
+
+const vuetify = createVuetify({
+  icons: {
+    defaultSet: 'mdi',
+    aliases,
+    sets: { mdi },
+  },
+})
+```
+
+### Component Auto-Import with vite-plugin-vuetify
+
+**Problem**: Importing all Vuetify components increases bundle size:
+
+```typescript
+// ❌ Imports ALL components
+import * as components from 'vuetify/components'
+```
+
+**Solution**: Use `vite-plugin-vuetify` for automatic, tree-shakeable imports:
+
+```typescript
+// vite.config.ts
+import vuetify from 'vite-plugin-vuetify'
+
+export default defineConfig({
+  plugins: [
+    vue(),
+    vuetify({ autoImport: true }),
+  ],
+})
+```
+
+With auto-import enabled, you can use Vuetify components in templates without explicit imports. The plugin analyzes your templates and only bundles the components you actually use.
+
+### Results
+
+These optimizations reduced the bundle size significantly:
+
+| Metric | Before | After | Savings |
+|--------|--------|-------|---------|
+| CSS | 848 kB | 376 kB | 56% |
+| JS | 632 kB | 329 kB | 48% |
+| Icon fonts | 3.6 MB | 0 | 100% |
 
 ---
 

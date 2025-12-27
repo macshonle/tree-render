@@ -1,5 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import {
+  mdiSquareOutline,
+  mdiSquareRoundedOutline,
+  mdiCircleOutline,
+  mdiEllipseOutline,
+  mdiVectorCurve,
+  mdiArrowRight,
+  mdiSitemapOutline,
+  mdiShapeOutline,
+  mdiVectorLine,
+  mdiArrowExpandAll,
+  mdiRefresh,
+} from '@mdi/js'
 import { useTreeStyle } from '@/composables/useTreeStyle'
 import type { NodeShape, EdgeStyle } from '@/types'
 
@@ -7,17 +20,17 @@ const { treeStyle, resetStyle } = useTreeStyle()
 
 // Node shape options
 const nodeShapeOptions: { value: NodeShape; label: string; icon: string }[] = [
-  { value: 'rectangle', label: 'Rectangle', icon: 'mdi-square-outline' },
-  { value: 'rounded-rectangle', label: 'Rounded', icon: 'mdi-square-rounded-outline' },
-  { value: 'circle', label: 'Circle', icon: 'mdi-circle-outline' },
-  { value: 'ellipse', label: 'Ellipse', icon: 'mdi-ellipse-outline' }
+  { value: 'rectangle', label: 'Rectangle', icon: mdiSquareOutline },
+  { value: 'rounded-rectangle', label: 'Rounded', icon: mdiSquareRoundedOutline },
+  { value: 'circle', label: 'Circle', icon: mdiCircleOutline },
+  { value: 'ellipse', label: 'Ellipse', icon: mdiEllipseOutline }
 ]
 
 // Edge style options
 const edgeStyleOptions: { value: EdgeStyle; label: string; icon: string }[] = [
-  { value: 'curve', label: 'Curve', icon: 'mdi-vector-curve' },
-  { value: 'straight-arrow', label: 'Straight', icon: 'mdi-arrow-right' },
-  { value: 'org-chart', label: 'Org Chart', icon: 'mdi-sitemap-outline' }
+  { value: 'curve', label: 'Curve', icon: mdiVectorCurve },
+  { value: 'straight-arrow', label: 'Straight', icon: mdiArrowRight },
+  { value: 'org-chart', label: 'Org Chart', icon: mdiSitemapOutline }
 ]
 
 // Computed bindings for v-model
@@ -67,7 +80,7 @@ const nodePadding = computed({
     <!-- Node Styles Section -->
     <v-expansion-panel class="style-section">
       <v-expansion-panel-title>
-        <v-icon size="small" class="mr-2">mdi-shape-outline</v-icon>
+        <v-icon size="small" class="mr-2" :icon="mdiShapeOutline" />
         Node Style
       </v-expansion-panel-title>
       <v-expansion-panel-text>
@@ -85,7 +98,7 @@ const nodePadding = computed({
               :value="shape.value"
               size="small"
             >
-              <v-icon>{{ shape.icon }}</v-icon>
+              <v-icon :icon="shape.icon" />
               <v-tooltip activator="parent" location="bottom">
                 {{ shape.label }}
               </v-tooltip>
@@ -121,7 +134,7 @@ const nodePadding = computed({
     <!-- Edge Styles Section -->
     <v-expansion-panel class="style-section">
       <v-expansion-panel-title>
-        <v-icon size="small" class="mr-2">mdi-vector-line</v-icon>
+        <v-icon size="small" class="mr-2" :icon="mdiVectorLine" />
         Edge Style
       </v-expansion-panel-title>
       <v-expansion-panel-text>
@@ -139,7 +152,7 @@ const nodePadding = computed({
               :value="style.value"
               size="small"
             >
-              <v-icon>{{ style.icon }}</v-icon>
+              <v-icon :icon="style.icon" />
               <v-tooltip activator="parent" location="bottom">
                 {{ style.label }}
               </v-tooltip>
@@ -163,7 +176,7 @@ const nodePadding = computed({
     <!-- Layout Section -->
     <v-expansion-panel class="style-section">
       <v-expansion-panel-title>
-        <v-icon size="small" class="mr-2">mdi-arrow-expand-all</v-icon>
+        <v-icon size="small" class="mr-2" :icon="mdiArrowExpandAll" />
         Layout Spacing
       </v-expansion-panel-title>
       <v-expansion-panel-text>
@@ -227,7 +240,7 @@ const nodePadding = computed({
       block
       @click="resetStyle"
     >
-      <v-icon start>mdi-refresh</v-icon>
+      <v-icon start :icon="mdiRefresh" />
       Reset to Defaults
     </v-btn>
   </div>

@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useTheme } from 'vuetify'
+import {
+  mdiWeatherSunny,
+  mdiWeatherNight,
+  mdiThemeLightDark,
+  mdiImport,
+  mdiExport,
+} from '@mdi/js'
 import StylePanel from './components/StylePanel.vue'
 import TreeViewCanvas from './components/TreeViewCanvas.vue'
 import { useTreeStyle } from './composables/useTreeStyle'
@@ -18,9 +25,9 @@ const themeMode = ref<'system' | 'light' | 'dark'>('system')
 // Icon for current theme mode
 const themeIcon = computed(() => {
   switch (themeMode.value) {
-    case 'light': return 'mdi-weather-sunny'
-    case 'dark': return 'mdi-weather-night'
-    default: return 'mdi-theme-light-dark'
+    case 'light': return mdiWeatherSunny
+    case 'dark': return mdiWeatherNight
+    default: return mdiThemeLightDark
   }
 })
 
@@ -114,7 +121,7 @@ async function handleFileSelect(event: Event) {
           class="mr-2"
           @click="handleImport"
         >
-          <v-icon start>mdi-import</v-icon>
+          <v-icon start :icon="mdiImport" />
           Import Style
         </v-btn>
         <v-btn
@@ -123,7 +130,7 @@ async function handleFileSelect(event: Event) {
           class="mr-4"
           @click="downloadStyle()"
         >
-          <v-icon start>mdi-export</v-icon>
+          <v-icon start :icon="mdiExport" />
           Export Style
         </v-btn>
         <input
