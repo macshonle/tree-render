@@ -65,11 +65,6 @@ const verticalGap = computed({
   set: (val: number) => { treeStyle.value.layout.verticalGap = val }
 })
 
-const lineSpacing = computed({
-  get: () => treeStyle.value.layout.lineSpacing,
-  set: (val: number) => { treeStyle.value.layout.lineSpacing = val }
-})
-
 const edgeWidth = computed({
   get: () => treeStyle.value.edge.width,
   set: (val: number) => { treeStyle.value.edge.width = val }
@@ -234,25 +229,9 @@ const nodePadding = computed({
             thumb-label
             density="compact"
             hide-details
-            class="mb-3"
           >
             <template #append>
               <span class="text-caption">{{ verticalGap }}px</span>
-            </template>
-          </v-slider>
-
-          <v-slider
-            v-model="lineSpacing"
-            label="Line Spacing"
-            :min="5"
-            :max="50"
-            :step="5"
-            thumb-label
-            density="compact"
-            hide-details
-          >
-            <template #append>
-              <span class="text-caption">{{ lineSpacing }}px</span>
             </template>
           </v-slider>
         </div>

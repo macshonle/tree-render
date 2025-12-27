@@ -26,7 +26,6 @@ export interface TreeStyle {
     algorithm: LayoutAlgorithmType
     horizontalGap: number
     verticalGap: number
-    lineSpacing: number
   }
 }
 
@@ -48,8 +47,7 @@ export const defaultTreeStyle: TreeStyle = {
   layout: {
     algorithm: 'maxwidth',
     horizontalGap: 10,
-    verticalGap: 40,
-    lineSpacing: 20
+    verticalGap: 40
   }
 }
 

@@ -37,7 +37,7 @@ function draw() {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const { node: nodeStyle, edge: edgeStyle, layout } = props.styleConfig
+  const { node: nodeStyle, edge: edgeStyle } = props.styleConfig
 
   // Clear canvas
   ctx.fillStyle = '#ffffff'
@@ -83,23 +83,47 @@ function draw() {
   ctx.translate(canvas.width / 2 + panOffset.value.x, offsetY + panOffset.value.y)
   ctx.scale(zoom.value, zoom.value)
 
-  // Draw edges recursively
-  function drawEdges(node: LayoutNode) {
-    for (const child of node.children) {
-      const parentBottom = node.y + node.height / 2
-      const childTop = child.y - child.height / 2
-      drawEdge(ctx!, node.x + offsetX, parentBottom, child.x + offsetX, childTop, edgeStyle, layout)
-      drawEdges(child)
+  // Calculate shape-specific vertical offset for edge attachment points
+  // Accounts for shape extensions beyond bounding box + stroke width
+  function getShapeVerticalOffset(nodeWidth: number, nodeHeight: number): number {
+    const strokeOffset = nodeStyle.strokeWidth / 2
+    switch (nodeStyle.shape) {
+      case 'circle':
+        // Circle uses max dimension, may extend beyond height
+        const circleRadius = Math.max(nodeWidth, nodeHeight) / 2
+        const heightRadius = nodeHeight / 2
+        return (circleRadius - heightRadius) + strokeOffset
+      case 'ellipse':
+        // Ellipse adds +2 to vertical radius
+        return 2 + strokeOffset
+      default:
+        // Rectangle and rounded-rectangle match bounding box
+        return strokeOffset
     }
   }
-  drawEdges(layoutRoot)
 
-  // Draw nodes recursively
-  function drawNodes(node: LayoutNode) {
+  // Draw tree bottom-up: children first, then edges, then parent node.
+  // This ensures arrow heads are drawn over child nodes, while edge starts
+  // are covered by parent nodes.
+  function drawSubtree(node: LayoutNode) {
+    // 1. Recursively draw all children first
+    for (const child of node.children) {
+      drawSubtree(child)
+    }
+
+    // 2. Draw edges from this node to its children (arrows on top of children)
+    const parentOffset = getShapeVerticalOffset(node.width, node.height)
+    for (const child of node.children) {
+      const childOffset = getShapeVerticalOffset(child.width, child.height)
+      const parentBottom = node.y + node.height / 2 + parentOffset
+      const childTop = child.y - child.height / 2 - childOffset
+      drawEdge(ctx!, node.x + offsetX, parentBottom, child.x + offsetX, childTop, edgeStyle)
+    }
+
+    // 3. Draw this node (covers edge starts)
     drawNode(ctx!, node.x + offsetX, node.y, node.label, nodeStyle, node.width, node.height)
-    node.children.forEach(drawNodes)
   }
-  drawNodes(layoutRoot)
+  drawSubtree(layoutRoot)
 
   ctx.restore()
 }
@@ -171,6 +195,7 @@ function drawNode(
       break
 
     case 'circle':
+      // Use the larger dimension to ensure text fits, shape extends beyond bounding box
       const circleRadius = Math.max(boxWidth, boxHeight) / 2
       ctx.beginPath()
       ctx.arc(x, y, circleRadius, 0, Math.PI * 2)
@@ -179,8 +204,11 @@ function drawNode(
       break
 
     case 'ellipse':
+      // Ellipse with slight padding to avoid text touching edges
+      const ellipseRx = boxWidth / 2 + 2
+      const ellipseRy = boxHeight / 2 + 2
       ctx.beginPath()
-      ctx.ellipse(x, y, boxWidth / 2 + 4, boxHeight / 2 + 2, 0, 0, Math.PI * 2)
+      ctx.ellipse(x, y, ellipseRx, ellipseRy, 0, 0, Math.PI * 2)
       ctx.fill()
       if (strokeWidth > 0) ctx.stroke()
       break
@@ -228,8 +256,7 @@ function drawEdge(
   y1: number,
   x2: number,
   y2: number,
-  style: TreeStyle['edge'],
-  layout: TreeStyle['layout']
+  style: TreeStyle['edge']
 ) {
   const { color, width, arrowSize } = style
 
@@ -266,7 +293,8 @@ function drawEdge(
 
     case 'org-chart':
       // Horizontal bus style: down, across, down
-      const midY = y1 + layout.lineSpacing
+      // Place horizontal bar at midpoint between parent bottom and child top
+      const midY = (y1 + y2) / 2
       ctx.moveTo(x1, y1)
       ctx.lineTo(x1, midY)
       ctx.lineTo(x2, midY)
