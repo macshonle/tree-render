@@ -35,7 +35,7 @@ interface TreeNode {
   children?: TreeNode[]
 }
 
-interface YamlNodeDSL {
+export interface YamlNodeDSL {
   node: string
   children?: YamlNodeDSL[]
 }
@@ -56,7 +56,7 @@ interface YamlTreeExample {
 /**
  * Transform the fluent YAML node DSL into TreeNode objects
  */
-function transformNodeDSL(nodes: YamlNodeDSL[], idPrefix: string = 'n'): TreeNode {
+export function transformNodeDSL(nodes: YamlNodeDSL[], idPrefix: string = 'n'): TreeNode {
   let idCounter = 0
 
   function transform(node: YamlNodeDSL): TreeNode {
@@ -86,7 +86,7 @@ function transformNodeDSL(nodes: YamlNodeDSL[], idPrefix: string = 'n'): TreeNod
 /**
  * Validate the YAML structure
  */
-function validateYamlExample(parsed: unknown, filePath: string): YamlTreeExample {
+export function validateYamlExample(parsed: unknown, filePath: string): YamlTreeExample {
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error(`${filePath}: Expected an object at root`)
   }

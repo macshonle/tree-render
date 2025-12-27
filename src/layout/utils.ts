@@ -79,10 +79,7 @@ export function nodeBounds(width: number, height: number): SubtreeBounds {
 /**
  * Calculate total width needed for children with gaps between them.
  */
-export function calculateChildrenTotalWidth(
-  childWidths: number[],
-  horizontalGap: number
-): number {
+export function calculateChildrenTotalWidth(childWidths: number[], horizontalGap: number): number {
   if (childWidths.length === 0) return 0
   const totalWidth = childWidths.reduce((sum, w) => sum + w, 0)
   const totalGaps = (childWidths.length - 1) * horizontalGap
@@ -96,7 +93,10 @@ export function calculateChildrenTotalWidth(
 /**
  * Create an empty contour with the specified number of rows.
  */
-export function makeEmptyContour(rows: number, rowStep: number = DEFAULT_CONTOUR_ROW_STEP): SkylineContour {
+export function makeEmptyContour(
+  rows: number,
+  rowStep: number = DEFAULT_CONTOUR_ROW_STEP
+): SkylineContour {
   return {
     left: new Array(rows).fill(+Infinity),
     right: new Array(rows).fill(-Infinity),
@@ -109,7 +109,11 @@ export function makeEmptyContour(rows: number, rowStep: number = DEFAULT_CONTOUR
  * Create a contour from a node's bounding box.
  * The node is centered at origin (x=0), extending from -w/2 to +w/2.
  */
-export function contourFromNodeBox(width: number, height: number, rowStep: number = DEFAULT_CONTOUR_ROW_STEP): SkylineContour {
+export function contourFromNodeBox(
+  width: number,
+  height: number,
+  rowStep: number = DEFAULT_CONTOUR_ROW_STEP
+): SkylineContour {
   const rows = Math.ceil(height / rowStep)
   const left = -width / 2
   const right = width / 2
@@ -165,12 +169,12 @@ export function translateContour(
   rowStep: number = DEFAULT_CONTOUR_ROW_STEP
 ): SkylineContour {
   const rowShift = Math.floor(dy / rowStep)
-  const newRows = rowShift + contour.left.length
+  const newRows = Math.max(0, rowShift + contour.left.length)
 
   const result: SkylineContour = {
     left: new Array(newRows).fill(+Infinity),
     right: new Array(newRows).fill(-Infinity),
-    height: contour.height + dy,
+    height: Math.max(0, contour.height + dy),
     rowStep,
   }
 

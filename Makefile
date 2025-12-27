@@ -3,7 +3,7 @@
 
 SHELL := /bin/bash
 
-.PHONY: all dev build test clean install help
+.PHONY: all dev build test lint typecheck clean install help
 
 # Default target
 all: build
@@ -20,10 +20,17 @@ dev:
 build:
 	pnpm build
 
-# Run tests (type checking via vue-tsc)
-# Note: No test framework configured yet; this runs type checking
+# Run tests
 test:
-	pnpm exec vue-tsc --noEmit
+	pnpm test
+
+# Lint the codebase
+lint:
+	pnpm lint
+
+# Type check without building
+typecheck:
+	pnpm typecheck
 
 # Clean all generated files
 clean:
@@ -40,7 +47,9 @@ help:
 	@echo "  make install    - Install dependencies"
 	@echo "  make dev        - Run the Vite development server"
 	@echo "  make build      - Build for production"
-	@echo "  make test       - Run type checking"
+	@echo "  make test       - Run tests"
+	@echo "  make lint       - Lint the codebase"
+	@echo "  make typecheck  - Type check without building"
 	@echo "  make clean      - Remove build artifacts"
 	@echo "  make distclean  - Remove build artifacts and node_modules"
 	@echo "  make help       - Show this help message"
