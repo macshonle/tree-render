@@ -1,0 +1,41 @@
+# File System Tree
+# Unix-style directory structure with org-chart connectors
+
+id: file-system
+name: File System Tree
+sizingMode: fixed
+nodeWidth: 80
+nodeHeight: 28
+style:
+  node: { shape: rectangle }
+  edge: { style: org-chart }
+
+tree:
+  - node: /
+    children:
+      - node: home
+        children:
+          - node: user1
+            children:
+              - node: documents
+              - node: pictures
+              - node: downloads
+                children:
+                  - node: file1.pdf
+                  - node: file2.jpg
+          - node: user2
+            children:
+              - node: projects
+              - node: music
+                children:
+                  - node: song1.mp3
+                  - node: song2.mp3
+                  - node: song3.mp3
+      - node: etc
+        children:
+          - node: config
+          - node: hosts
+      - node: var
+        children:
+          - node: log
+          - node: tmp

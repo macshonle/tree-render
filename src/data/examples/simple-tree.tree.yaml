@@ -1,0 +1,28 @@
+# Simple Tree
+# Basic lettered tree for testing
+
+id: simple-tree
+name: Simple Tree
+sizingMode: fixed
+nodeWidth: 60
+nodeHeight: 28
+style:
+  node: { shape: rounded-rectangle }
+  edge: { style: straight-arrow }
+
+tree:
+  - node: A
+    children:
+      - node: B
+        children:
+          - node: D
+          - node: E
+            children:
+              - node: H
+              - node: I
+      - node: C
+        children:
+          - node: F
+            children:
+              - node: J
+          - node: G

@@ -1,6 +1,19 @@
 import { ref, computed } from 'vue'
-import { treeExamples } from '@/data/treeExamples'
+import type { TreeExample } from '@/types'
 import { useTreeStyle } from './useTreeStyle'
+
+// Import all .tree.yaml files at build time using Vite's glob import
+// The custom vite-plugin-tree-examples transforms these into TreeExample objects
+// Note: import.meta.glob requires a relative path (not the @ alias)
+const exampleModules = import.meta.glob<TreeExample>(
+  '../data/examples/*.tree.yaml',
+  { eager: true, import: 'default' }
+)
+
+// Convert the module record to a sorted array
+const treeExamples: TreeExample[] = Object.values(exampleModules).sort((a, b) =>
+  a.name.localeCompare(b.name)
+)
 
 // Module-level state (shared across components)
 const selectedExampleId = ref<string>(treeExamples[0]?.id ?? '')

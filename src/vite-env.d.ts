@@ -12,3 +12,10 @@ declare module 'vuetify/styles' {
 }
 
 declare module '@fontsource-variable/ibm-plex-sans'
+
+// Tree example YAML files are transformed by vite-plugin-tree-examples
+declare module '*.tree.yaml' {
+  import type { TreeExample } from '@/types'
+  const example: TreeExample
+  export default example
+}

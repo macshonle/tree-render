@@ -1,0 +1,23 @@
+# Binary Tree (CS Textbook Style)
+# Classic numbered binary tree with circular nodes
+
+id: binary-tree
+name: Binary Tree
+sizingMode: fixed
+nodeWidth: 40
+nodeHeight: 40
+style:
+  node: { shape: circle }
+  edge: { style: straight-arrow }
+
+tree:
+  - node: 1
+    children:
+      - node: 2
+        children:
+          - node: 4
+          - node: 5
+      - node: 3
+        children:
+          - node: 6
+          - node: 7

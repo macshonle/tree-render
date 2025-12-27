@@ -1,0 +1,35 @@
+# Org Chart: Wide and Deep
+# Tests both deep chains and wide fan-out with straight arrows
+
+id: org-chart-wide
+name: Wide and Deep
+sizingMode: fit-content
+style:
+  node: { shape: rounded-rectangle }
+  edge: { style: straight-arrow }
+
+tree:
+  - node: "Root\ncomb + fan-out"
+    children:
+      - node: Deep Chain
+        children:
+          - node: d1
+            children:
+              - node: d2 Wide Label Here
+                children:
+                  - node: "d3\nvery tall\nline3"
+                    children:
+                      - node: d4
+                        children:
+                          - node: d5 end
+      - node: "Middle\nSpacer"
+        children:
+          - node: m1
+          - node: m2
+      - node: Fan-out
+        children:
+          - node: Child 0
+          - node: Child 1
+          - node: Child 2
+          - node: Child 3
+          - node: Child 4

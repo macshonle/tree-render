@@ -13,7 +13,8 @@ This document explains Vue 3 concepts as they are used in the Tree Render applic
 7. [Lifecycle Hooks](#lifecycle-hooks)
 8. [Vuetify Integration](#vuetify-integration)
 9. [Bundle Optimization](#bundle-optimization)
-10. [TypeScript Integration](#typescript-integration)
+10. [Vite Plugins and Build-Time Transforms](#vite-plugins-and-build-time-transforms)
+11. [TypeScript Integration](#typescript-integration)
 
 ---
 
@@ -28,11 +29,15 @@ tree-render/
 │   │   ├── StylePanel.vue   # Side panel with style controls
 │   │   └── TreeViewCanvas.vue # Canvas for tree visualization
 │   ├── composables/         # Shared reactive state & logic
-│   │   └── useTreeStyle.ts  # Tree style state management
+│   │   ├── useTreeStyle.ts  # Tree style state management
+│   │   └── useTreeExamples.ts # Tree example loading
+│   ├── data/
+│   │   └── examples/        # Tree example definitions (.tree.yaml)
 │   ├── types/               # TypeScript type definitions
 │   │   └── index.ts
 │   └── styles/              # Global styles
 │       └── main.scss
+├── vite-plugin-tree-examples.ts  # Custom Vite plugin for YAML transform
 ├── index.html               # HTML entry point
 ├── vite.config.ts           # Vite configuration
 └── package.json
@@ -460,8 +465,147 @@ These optimizations reduced the bundle size significantly:
 | Metric | Before | After | Savings |
 |--------|--------|-------|---------|
 | CSS | 848 kB | 376 kB | 56% |
-| JS | 632 kB | 329 kB | 48% |
+| JS | 632 kB | 326 kB | 48% |
 | Icon fonts | 3.6 MB | 0 | 100% |
+
+---
+
+## Vite Plugins and Build-Time Transforms
+
+Vite's plugin system enables powerful build-time transformations. This project uses a custom plugin to transform YAML tree definitions into JavaScript modules.
+
+### How Vite Plugins Work
+
+Vite plugins can intercept files at various stages of the build process:
+
+```
+User imports a file (e.g., '*.tree.yaml')
+        ↓
+Plugin's resolveId() — Redirect imports, create virtual modules
+        ↓
+Plugin's load() — Generate content for the file
+        ↓
+Plugin's transform() — Modify/compile the content
+        ↓
+Vite bundles the transformed module
+```
+
+### Glob Imports with import.meta.glob
+
+Vite provides `import.meta.glob` for importing multiple files at build time:
+
+```typescript
+// Import all .tree.yaml files eagerly (bundled at build time)
+// Note: import.meta.glob requires relative paths, not the @ alias
+const modules = import.meta.glob<TreeExample>(
+  '../data/examples/*.tree.yaml',
+  { eager: true, import: 'default' }
+)
+
+// Result: { '../data/examples/foo.tree.yaml': TreeExample, ... }
+const examples = Object.values(modules)
+```
+
+Options:
+- `eager: true` — Load all modules immediately (no lazy loading)
+- `import: 'default'` — Import the default export directly
+- Without `eager`, modules are loaded lazily as `() => Promise<Module>`
+
+**Important**: The glob pattern must be a relative path. Path aliases like `@/` don't work with `import.meta.glob` because the pattern is analyzed statically at build time before alias resolution.
+
+### Custom Plugin: Tree Examples
+
+This project includes `vite-plugin-tree-examples.ts` which transforms `.tree.yaml` files into `TreeExample` modules.
+
+**YAML format (fluent DSL):**
+
+```yaml
+# src/data/examples/binary-tree.tree.yaml
+id: binary-tree
+name: Binary Tree
+sizingMode: fixed
+nodeWidth: 40
+nodeHeight: 40
+style:
+  node: { shape: circle }
+  edge: { style: straight-arrow }
+
+tree:
+  - node: 1
+    children:
+      - node: 2
+        children:
+          - node: 4
+          - node: 5
+      - node: 3
+        children:
+          - node: 6
+          - node: 7
+```
+
+**Plugin implementation (simplified):**
+
+```typescript
+// vite-plugin-tree-examples.ts
+import type { Plugin } from 'vite'
+import YAML from 'yaml'
+
+export default function treeExamplesPlugin(): Plugin {
+  return {
+    name: 'vite-plugin-tree-examples',
+
+    transform(code: string, id: string) {
+      // Only process .tree.yaml files
+      if (!id.endsWith('.tree.yaml')) return null
+
+      // Parse YAML and transform the tree DSL
+      const parsed = YAML.parse(code)
+      const treeExample = transformToTreeExample(parsed)
+
+      // Return as ES module
+      return {
+        code: `export default ${JSON.stringify(treeExample)}`,
+        map: null,
+      }
+    },
+  }
+}
+```
+
+**Registering the plugin:**
+
+```typescript
+// vite.config.ts
+import treeExamples from './vite-plugin-tree-examples'
+
+export default defineConfig({
+  plugins: [
+    vue(),
+    vuetify({ autoImport: true }),
+    treeExamples(),  // Custom plugin
+  ],
+})
+```
+
+### TypeScript Support for Custom File Types
+
+Add type declarations for custom imports:
+
+```typescript
+// src/vite-env.d.ts
+declare module '*.tree.yaml' {
+  import type { TreeExample } from '@/types'
+  const example: TreeExample
+  export default example
+}
+```
+
+### Benefits of Build-Time Transforms
+
+1. **Authoring experience** — Write in YAML with comments, simpler syntax
+2. **Runtime performance** — No parsing overhead; data is pre-compiled to JS
+3. **Type safety** — Plugin validates structure; TypeScript knows the types
+4. **Bundle optimization** — Only include what's used; tree-shake unused examples
 
 ---
 

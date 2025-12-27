@@ -1,0 +1,27 @@
+# Org Chart: Media/Scene Graph
+# Demonstrates UI component hierarchy with curved edges
+
+id: org-chart-media
+name: Media
+sizingMode: fit-content
+style:
+  node: { shape: rounded-rectangle }
+  edge: { style: curve }
+
+tree:
+  - node: Scene Graph
+    children:
+      - node: Group Alpha
+        children:
+          - node: Leaf A
+          - node: "Leaf B\nTall\nText"
+      - node: UI Layer
+        children:
+          - node: "Button\nPrimary"
+            children:
+              - node: Icon
+              - node: Label
+      - node: Sidebar
+        children:
+          - node: Nav Item 1
+          - node: Nav Item 2

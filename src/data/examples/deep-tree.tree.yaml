@@ -1,0 +1,36 @@
+# Deep Tree
+# Tree with longer labels and varying depths
+
+id: deep-tree
+name: Deep Tree
+sizingMode: fit-content
+style:
+  node: { shape: rounded-rectangle }
+  edge: { style: org-chart }
+
+tree:
+  - node: Long Root Label
+    children:
+      - node: Branch B
+        children:
+          - node: Depth D
+            children:
+              - node: H
+              - node: Item I
+                children:
+                  - node: P
+                  - node: Q
+          - node: Element E
+            children:
+              - node: J
+              - node: K
+      - node: Category C
+        children:
+          - node: Factor F
+            children:
+              - node: L
+              - node: Longer Label M
+          - node: Group G
+            children:
+              - node: N
+              - node: O

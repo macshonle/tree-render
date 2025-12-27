@@ -444,12 +444,18 @@ onMounted(() => {
       }
     })
     resizeObserver.observe(containerRef.value)
+
+    // Add wheel listener with { passive: false } to allow preventDefault()
+    // Vue's @wheel directive uses passive listeners by default for performance,
+    // but we need to prevent default to implement custom zoom behavior
+    containerRef.value.addEventListener('wheel', handleWheel, { passive: false })
   }
   window.addEventListener('resize', resizeCanvas)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', resizeCanvas)
+  containerRef.value?.removeEventListener('wheel', handleWheel)
   resizeObserver?.disconnect()
 })
 </script>
@@ -462,7 +468,6 @@ onUnmounted(() => {
     @mousemove="handleMouseMove"
     @mouseup="handleMouseUp"
     @mouseleave="handleMouseUp"
-    @wheel="handleWheel"
   >
     <canvas
       ref="canvasRef"

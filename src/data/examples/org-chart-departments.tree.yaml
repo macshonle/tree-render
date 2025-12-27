@@ -1,0 +1,45 @@
+# Org Chart: Departments
+# Demonstrates multi-line labels and org-chart edge style
+
+id: org-chart-departments
+name: Departments
+sizingMode: fit-content
+style:
+  node: { shape: rounded-rectangle }
+  edge: { style: org-chart }
+
+tree:
+  - node: "Root\n(CEO)"
+    children:
+      - node: "A: Policy &\nCompliance"
+        children:
+          - node: A1
+            children:
+              - node: A1.a Long Label
+              - node: A1.b
+          - node: A2
+            children:
+              - node: "A2.a\nnotes"
+                children:
+                  - node: A2.a.i
+                  - node: A2.a.ii
+      - node: "B: Engineering"
+        children:
+          - node: "B1 Platform\n(SLOs)"
+            children:
+              - node: B1.a Build
+              - node: B1.b Deploy
+              - node: B1.c Observe
+          - node: "B2\nDev Experience"
+            children:
+              - node: B2.a IDE
+              - node: B2.b Docs
+      - node: "C: Sales &\nMarketing"
+        children:
+          - node: "C1 Field\nTeam"
+          - node: C2 Growth
+            children:
+              - node: C2.a
+              - node: C2.b
+              - node: C2.c
+              - node: C2.d

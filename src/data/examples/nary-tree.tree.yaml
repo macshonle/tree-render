@@ -1,0 +1,33 @@
+# N-ary Tree (General Tree)
+# Lettered tree with varying branching factors
+
+id: nary-tree
+name: General Tree
+sizingMode: fixed
+nodeWidth: 40
+nodeHeight: 40
+style:
+  node: { shape: ellipse }
+  edge: { style: straight-arrow }
+
+tree:
+  - node: Root
+    children:
+      - node: A
+        children:
+          - node: A1
+          - node: A2
+          - node: A3
+      - node: B
+        children:
+          - node: B1
+          - node: B2
+      - node: C
+        children:
+          - node: C1
+            children:
+              - node: C1.1
+              - node: C1.2
+          - node: C2
+          - node: C3
+          - node: C4
