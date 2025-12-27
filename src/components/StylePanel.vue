@@ -14,7 +14,7 @@ import {
   mdiRefresh,
 } from '@mdi/js'
 import { useTreeStyle } from '@/composables/useTreeStyle'
-import type { NodeShape, EdgeStyle } from '@/types'
+import type { NodeShape, EdgeStyle, LayoutAlgorithmType } from '@/types'
 
 const { treeStyle, resetStyle } = useTreeStyle()
 
@@ -33,6 +33,12 @@ const edgeStyleOptions: { value: EdgeStyle; label: string; icon: string }[] = [
   { value: 'org-chart', label: 'Org Chart', icon: mdiSitemapOutline }
 ]
 
+// Layout algorithm options
+const layoutAlgorithmOptions: { value: LayoutAlgorithmType; label: string }[] = [
+  { value: 'maxwidth', label: 'Centered' },
+  { value: 'top-align', label: 'Top Align' }
+]
+
 // Computed bindings for v-model
 const nodeShape = computed({
   get: () => treeStyle.value.node.shape,
@@ -42,6 +48,11 @@ const nodeShape = computed({
 const edgeStyle = computed({
   get: () => treeStyle.value.edge.style,
   set: (val: EdgeStyle) => { treeStyle.value.edge.style = val }
+})
+
+const layoutAlgorithm = computed({
+  get: () => treeStyle.value.layout.algorithm,
+  set: (val: LayoutAlgorithmType) => { treeStyle.value.layout.algorithm = val }
 })
 
 const horizontalGap = computed({
@@ -177,10 +188,27 @@ const nodePadding = computed({
     <v-expansion-panel class="style-section">
       <v-expansion-panel-title>
         <v-icon size="small" class="mr-2" :icon="mdiArrowExpandAll" />
-        Layout Spacing
+        Layout
       </v-expansion-panel-title>
       <v-expansion-panel-text>
         <div class="pa-2">
+          <div class="text-caption mb-2">Algorithm</div>
+          <v-btn-toggle
+            v-model="layoutAlgorithm"
+            mandatory
+            density="compact"
+            class="mb-3"
+          >
+            <v-btn
+              v-for="algo in layoutAlgorithmOptions"
+              :key="algo.value"
+              :value="algo.value"
+              size="small"
+            >
+              {{ algo.label }}
+            </v-btn>
+          </v-btn-toggle>
+
           <v-slider
             v-model="horizontalGap"
             label="H Gap"

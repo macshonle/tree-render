@@ -4,6 +4,9 @@ export type NodeShape = 'rectangle' | 'rounded-rectangle' | 'circle' | 'ellipse'
 // Edge style types
 export type EdgeStyle = 'curve' | 'straight-arrow' | 'org-chart'
 
+// Layout algorithm types
+export type LayoutAlgorithmType = 'maxwidth' | 'top-align'
+
 // Style configuration for the tree
 export interface TreeStyle {
   node: {
@@ -20,6 +23,7 @@ export interface TreeStyle {
     arrowSize: number
   }
   layout: {
+    algorithm: LayoutAlgorithmType
     horizontalGap: number
     verticalGap: number
     lineSpacing: number
@@ -42,17 +46,32 @@ export const defaultTreeStyle: TreeStyle = {
     arrowSize: 8
   },
   layout: {
+    algorithm: 'maxwidth',
     horizontalGap: 10,
     verticalGap: 40,
     lineSpacing: 20
   }
 }
 
-// Tree node data structure (for future use)
+// Tree node data structure
 export interface TreeNode {
   id: string
   label: string
   children?: TreeNode[]
+  // Per-node sizing (for images or fixed-size nodes)
+  width?: number
+  height?: number
+}
+
+// Layout node with calculated positions (output of layout algorithms)
+export interface LayoutNode {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  children: LayoutNode[]
 }
 
 // Sizing mode for tree examples

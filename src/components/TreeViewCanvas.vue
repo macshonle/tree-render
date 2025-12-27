@@ -1,23 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { mdiPlus, mdiMinus } from '@mdi/js'
-import type { TreeStyle, TreeExample, TreeNode } from '@/types'
+import type { TreeStyle, TreeExample, LayoutNode } from '@/types'
+import { layoutTree, createCanvasTextMeasurer } from '@/layout'
 
 const props = defineProps<{
   styleConfig: TreeStyle
   treeData?: TreeExample | null
 }>()
-
-// Layout node with calculated positions
-interface LayoutNode {
-  id: string
-  label: string
-  x: number
-  y: number
-  width: number
-  height: number
-  children: LayoutNode[]
-}
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -27,108 +17,6 @@ const panOffset = ref({ x: 0, y: 0 })
 const zoom = ref(1)
 const isPanning = ref(false)
 const lastMousePos = ref({ x: 0, y: 0 })
-
-// Measure text dimensions (supports multi-line)
-function measureText(
-  ctx: CanvasRenderingContext2D,
-  label: string,
-  padding: number
-): { width: number; height: number; lines: string[] } {
-  const lines = label.split('\n')
-  const lineHeight = 18
-  let maxWidth = 0
-  for (const line of lines) {
-    const metrics = ctx.measureText(line)
-    maxWidth = Math.max(maxWidth, metrics.width)
-  }
-  return {
-    width: maxWidth + padding * 2,
-    height: lines.length * lineHeight + padding * 2,
-    lines,
-  }
-}
-
-// Calculate node dimensions based on sizing mode
-function calculateNodeSize(
-  ctx: CanvasRenderingContext2D,
-  label: string,
-  treeData: TreeExample,
-  padding: number
-): { width: number; height: number; lines: string[] } {
-  if (treeData.sizingMode === 'fixed' && treeData.nodeWidth && treeData.nodeHeight) {
-    return {
-      width: treeData.nodeWidth,
-      height: treeData.nodeHeight,
-      lines: label.split('\n'),
-    }
-  }
-  // fit-content mode
-  return measureText(ctx, label, padding)
-}
-
-// Calculate layout for the tree using maxwidth algorithm
-function layoutTree(
-  ctx: CanvasRenderingContext2D,
-  root: TreeNode,
-  treeData: TreeExample,
-  layout: TreeStyle['layout'],
-  padding: number
-): LayoutNode {
-  const { horizontalGap, verticalGap } = layout
-
-  // First pass: calculate sizes for all nodes
-  function calculateSizes(node: TreeNode): LayoutNode {
-    const size = calculateNodeSize(ctx, node.label, treeData, padding)
-    const layoutNode: LayoutNode = {
-      id: node.id,
-      label: node.label,
-      x: 0,
-      y: 0,
-      width: size.width,
-      height: size.height,
-      children: node.children?.map(calculateSizes) ?? [],
-    }
-    return layoutNode
-  }
-
-  const layoutRoot = calculateSizes(root)
-
-  // Calculate subtree widths
-  function calcSubtreeWidth(node: LayoutNode): number {
-    if (node.children.length === 0) {
-      return node.width
-    }
-    let childrenWidth = 0
-    for (const child of node.children) {
-      childrenWidth += calcSubtreeWidth(child)
-    }
-    childrenWidth += (node.children.length - 1) * horizontalGap
-    return Math.max(node.width, childrenWidth)
-  }
-
-  // Position nodes
-  function positionNodes(node: LayoutNode, x: number, y: number) {
-    node.x = x
-    node.y = y
-
-    if (node.children.length === 0) return
-
-    const subtreeWidth = calcSubtreeWidth(node)
-    let childX = x - subtreeWidth / 2
-
-    for (const child of node.children) {
-      const childSubtreeWidth = calcSubtreeWidth(child)
-      const childCenterX = childX + childSubtreeWidth / 2
-      positionNodes(child, childCenterX, y + node.height + verticalGap)
-      childX += childSubtreeWidth + horizontalGap
-    }
-  }
-
-  const totalWidth = calcSubtreeWidth(layoutRoot)
-  positionNodes(layoutRoot, totalWidth / 2, 0)
-
-  return layoutRoot
-}
 
 function resizeCanvas() {
   if (containerRef.value && canvasRef.value) {
@@ -172,8 +60,9 @@ function draw() {
   // Set font for text measurement
   ctx.font = '14px system-ui, sans-serif'
 
-  // Calculate tree layout
-  const layoutRoot = layoutTree(ctx, props.treeData.root, props.treeData, layout, nodeStyle.padding)
+  // Calculate tree layout using the selected algorithm
+  const textMeasurer = createCanvasTextMeasurer(ctx)
+  const layoutRoot = layoutTree(props.treeData.root, props.treeData, props.styleConfig, textMeasurer)
 
   // Calculate tree bounds for centering
   let minX = Infinity, maxX = -Infinity, maxY = -Infinity
