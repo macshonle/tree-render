@@ -112,12 +112,55 @@ function draw() {
     }
 
     // 2. Draw edges from this node to its children (arrows on top of children)
-    const parentOffset = getShapeVerticalOffset(node.width, node.height)
-    for (const child of node.children) {
-      const childOffset = getShapeVerticalOffset(child.width, child.height)
+    if (node.children.length > 0) {
+      const parentOffset = getShapeVerticalOffset(node.width, node.height)
+      const parentX = node.x + offsetX
       const parentBottom = node.y + node.height / 2 + parentOffset
-      const childTop = child.y - child.height / 2 - childOffset
-      drawEdge(ctx!, node.x + offsetX, parentBottom, child.x + offsetX, childTop, edgeStyle)
+
+      // Calculate child endpoints
+      const childEndpoints = node.children.map(child => {
+        const childOffset = getShapeVerticalOffset(child.width, child.height)
+        return {
+          x: child.x + offsetX,
+          y: child.y - child.height / 2 - childOffset
+        }
+      })
+
+      if (edgeStyle.style === 'org-chart') {
+        // Org-chart: draw as single connected structure with shared horizontal bar
+        // Bar Y is midpoint between parent bottom and topmost child
+        const minChildY = Math.min(...childEndpoints.map(c => c.y))
+        const barY = (parentBottom + minChildY) / 2
+
+        ctx!.strokeStyle = edgeStyle.color
+        ctx!.lineWidth = edgeStyle.width
+        ctx!.lineCap = 'round'
+        ctx!.lineJoin = 'round'
+        ctx!.beginPath()
+
+        // Vertical drop from parent to bar
+        ctx!.moveTo(parentX, parentBottom)
+        ctx!.lineTo(parentX, barY)
+
+        // Horizontal bar spanning all children
+        const leftX = Math.min(...childEndpoints.map(c => c.x))
+        const rightX = Math.max(...childEndpoints.map(c => c.x))
+        ctx!.moveTo(leftX, barY)
+        ctx!.lineTo(rightX, barY)
+
+        // Vertical drops from bar to each child
+        for (const child of childEndpoints) {
+          ctx!.moveTo(child.x, barY)
+          ctx!.lineTo(child.x, child.y)
+        }
+
+        ctx!.stroke()
+      } else {
+        // Curve and straight-arrow: draw individual edges
+        for (const child of childEndpoints) {
+          drawEdge(ctx!, parentX, parentBottom, child.x, child.y, edgeStyle)
+        }
+      }
     }
 
     // 3. Draw this node (covers edge starts)
