@@ -7,6 +7,9 @@ import {
   mergeBounds,
   nodeBounds,
   calculateChildrenTotalWidth,
+  contourFromNodeBox,
+  mergeContours,
+  cloneContour,
 } from '../utils'
 
 /**
@@ -25,8 +28,11 @@ export const topAlignLayout: LayoutAlgorithm = (
   children: LaidOutChild[],
   context
 ): LayoutResult => {
-  const { horizontalGap, verticalGap } = context.layout
+  const { horizontalGap, verticalGap, contourRowStep } = context.layout
   const nodeSize = calculateNodeSize(node, context)
+
+  // Create contour for this node
+  const nodeContour = contourFromNodeBox(nodeSize.width, nodeSize.height, contourRowStep)
 
   // Position current node at origin (will be translated by parent)
   const layoutNode: LayoutNode = {
@@ -39,9 +45,14 @@ export const topAlignLayout: LayoutAlgorithm = (
     children: [],
   }
 
-  // If no children, bounds are just this node
+  // If no children, bounds and contour are just this node
   if (children.length === 0) {
-    return { root: layoutNode, bounds: nodeBounds(nodeSize.width, nodeSize.height) }
+    layoutNode.contour = nodeContour
+    return {
+      root: layoutNode,
+      bounds: nodeBounds(nodeSize.width, nodeSize.height),
+      contour: nodeContour,
+    }
   }
 
   // Calculate child subtree widths for horizontal positioning
@@ -58,6 +69,9 @@ export const topAlignLayout: LayoutAlgorithm = (
   let currentX = -totalChildrenWidth / 2
   const positionedChildren: LayoutNode[] = []
   const childBoundsList: SubtreeBounds[] = []
+
+  // Start with the node's own contour, then merge children
+  const subtreeContour = cloneContour(nodeContour)
 
   for (let i = 0; i < children.length; i++) {
     const child = children[i]
@@ -83,10 +97,14 @@ export const topAlignLayout: LayoutAlgorithm = (
     // Track the translated bounds
     childBoundsList.push(translateBounds(childBounds, childOffsetX, childOffsetY))
 
+    // Merge child contour into subtree contour
+    mergeContours(subtreeContour, childLayout.contour, childOffsetX, childOffsetY, contourRowStep)
+
     currentX += childWidth + horizontalGap
   }
 
   layoutNode.children = positionedChildren
+  layoutNode.contour = subtreeContour
 
   // Compute overall bounds: union of this node's bounds and all children's bounds
   const overallBounds = mergeBounds([
@@ -94,5 +112,5 @@ export const topAlignLayout: LayoutAlgorithm = (
     ...childBoundsList,
   ])
 
-  return { root: layoutNode, bounds: overallBounds }
+  return { root: layoutNode, bounds: overallBounds, contour: subtreeContour }
 }

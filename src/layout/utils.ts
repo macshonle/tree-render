@@ -1,5 +1,6 @@
 import type { TreeNode, LayoutNode } from '@/types'
-import type { LayoutContext, SubtreeBounds } from './types'
+import type { LayoutContext, SubtreeBounds, SkylineContour } from './types'
+import { DEFAULT_CONTOUR_ROW_STEP } from './types'
 
 /**
  * Calculate node dimensions based on sizing mode and per-node overrides.
@@ -86,4 +87,112 @@ export function calculateChildrenTotalWidth(
   const totalWidth = childWidths.reduce((sum, w) => sum + w, 0)
   const totalGaps = (childWidths.length - 1) * horizontalGap
   return totalWidth + totalGaps
+}
+
+// ============================================================================
+// Skyline Contour Utilities
+// ============================================================================
+
+/**
+ * Create an empty contour with the specified number of rows.
+ */
+export function makeEmptyContour(rows: number, rowStep: number = DEFAULT_CONTOUR_ROW_STEP): SkylineContour {
+  return {
+    left: new Array(rows).fill(+Infinity),
+    right: new Array(rows).fill(-Infinity),
+    height: rows * rowStep,
+    rowStep,
+  }
+}
+
+/**
+ * Create a contour from a node's bounding box.
+ * The node is centered at origin (x=0), extending from -w/2 to +w/2.
+ */
+export function contourFromNodeBox(width: number, height: number, rowStep: number = DEFAULT_CONTOUR_ROW_STEP): SkylineContour {
+  const rows = Math.ceil(height / rowStep)
+  const left = -width / 2
+  const right = width / 2
+  return {
+    left: new Array(rows).fill(left),
+    right: new Array(rows).fill(right),
+    height,
+    rowStep,
+  }
+}
+
+/**
+ * Merge a source contour into a destination contour with offset (dx, dy).
+ * Modifies dst in place, expanding its arrays if needed.
+ */
+export function mergeContours(
+  dst: SkylineContour,
+  src: SkylineContour,
+  dx: number,
+  dy: number,
+  rowStep: number = DEFAULT_CONTOUR_ROW_STEP
+): void {
+  const rowShift = Math.floor(dy / rowStep)
+  const needRows = Math.max(dst.left.length, rowShift + src.left.length)
+
+  // Expand destination arrays if needed
+  if (needRows > dst.left.length) {
+    const add = needRows - dst.left.length
+    dst.left.push(...new Array(add).fill(+Infinity))
+    dst.right.push(...new Array(add).fill(-Infinity))
+  }
+
+  // Merge source into destination
+  for (let i = 0; i < src.left.length; i++) {
+    const j = i + rowShift
+    if (j >= 0 && j < dst.left.length) {
+      dst.left[j] = Math.min(dst.left[j], src.left[i] + dx)
+      dst.right[j] = Math.max(dst.right[j], src.right[i] + dx)
+    }
+  }
+
+  // Update height
+  dst.height = Math.max(dst.height, dy + src.height)
+}
+
+/**
+ * Translate a contour by (dx, dy), returning a new contour.
+ */
+export function translateContour(
+  contour: SkylineContour,
+  dx: number,
+  dy: number,
+  rowStep: number = DEFAULT_CONTOUR_ROW_STEP
+): SkylineContour {
+  const rowShift = Math.floor(dy / rowStep)
+  const newRows = rowShift + contour.left.length
+
+  const result: SkylineContour = {
+    left: new Array(newRows).fill(+Infinity),
+    right: new Array(newRows).fill(-Infinity),
+    height: contour.height + dy,
+    rowStep,
+  }
+
+  for (let i = 0; i < contour.left.length; i++) {
+    const j = i + rowShift
+    if (j >= 0 && j < newRows) {
+      result.left[j] = contour.left[i] + dx
+      result.right[j] = contour.right[i] + dx
+    }
+  }
+
+  return result
+}
+
+/**
+ * Clone a contour (deep copy).
+ */
+export function cloneContour(contour: SkylineContour): SkylineContour {
+  return {
+    left: [...contour.left],
+    right: [...contour.right],
+    height: contour.height,
+    rowStep: contour.rowStep,
+  }
 }

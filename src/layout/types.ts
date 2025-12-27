@@ -20,10 +20,6 @@ export interface TextMeasurer {
 /**
  * Bounding rectangle for a subtree.
  * Coordinates are relative to the subtree root's position.
- *
- * Future: This will evolve into skyline contours (left/right edge profiles)
- * for tighter packing where subtree bounding boxes can overlap without
- * nodes or edges intersecting.
  */
 export interface SubtreeBounds {
   /** Leftmost x coordinate (relative to root x) */
@@ -37,6 +33,29 @@ export interface SubtreeBounds {
 }
 
 /**
+ * Skyline contour for a subtree.
+ *
+ * Represents the left and right edge profiles of a subtree as arrays
+ * indexed by row (y / rowStep). This enables tighter packing where
+ * subtree bounding boxes can overlap without nodes actually intersecting.
+ *
+ * Coordinates are relative to the subtree root's position.
+ */
+export interface SkylineContour {
+  /** Left edge x-coordinates per row (indexed by row number) */
+  left: number[]
+  /** Right edge x-coordinates per row (indexed by row number) */
+  right: number[]
+  /** Total height of the contour in pixels */
+  height: number
+  /** Row step used when this contour was created (for consistent rendering) */
+  rowStep: number
+}
+
+/** Default row height for contour sampling (pixels). Use layout.contourRowStep for configurable value. */
+export const DEFAULT_CONTOUR_ROW_STEP = 4
+
+/**
  * Result of laying out a subtree.
  * Contains both the positioned nodes and the subtree's boundary information.
  */
@@ -45,6 +64,8 @@ export interface LayoutResult {
   root: LayoutNode
   /** Boundary information for composition with siblings */
   bounds: SubtreeBounds
+  /** Skyline contour for tighter packing algorithms */
+  contour: SkylineContour
 }
 
 /**

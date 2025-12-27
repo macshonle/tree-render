@@ -26,6 +26,8 @@ export interface TreeStyle {
     algorithm: LayoutAlgorithmType
     horizontalGap: number
     verticalGap: number
+    /** Row height for contour sampling in pixels (affects layout precision vs performance) */
+    contourRowStep: number
   }
 }
 
@@ -47,7 +49,8 @@ export const defaultTreeStyle: TreeStyle = {
   layout: {
     algorithm: 'maxwidth',
     horizontalGap: 10,
-    verticalGap: 40
+    verticalGap: 40,
+    contourRowStep: 4
   }
 }
 
@@ -61,6 +64,15 @@ export interface TreeNode {
   height?: number
 }
 
+// Skyline contour for subtree edge profiles (re-exported from layout/types)
+export interface SkylineContour {
+  left: number[]
+  right: number[]
+  height: number
+  /** Row step used when this contour was created (for consistent rendering) */
+  rowStep: number
+}
+
 // Layout node with calculated positions (output of layout algorithms)
 export interface LayoutNode {
   id: string
@@ -70,6 +82,8 @@ export interface LayoutNode {
   width: number
   height: number
   children: LayoutNode[]
+  /** Skyline contour for this subtree (for debug visualization) */
+  contour?: SkylineContour
 }
 
 // Sizing mode for tree examples

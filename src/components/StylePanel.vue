@@ -12,11 +12,19 @@ import {
   mdiVectorLine,
   mdiArrowExpandAll,
   mdiRefresh,
+  mdiBug,
 } from '@mdi/js'
 import { useTreeStyle } from '@/composables/useTreeStyle'
+import { useDebugMode } from '@/composables/useDebugMode'
 import type { NodeShape, EdgeStyle, LayoutAlgorithmType } from '@/types'
 
 const { treeStyle, resetStyle } = useTreeStyle()
+const { debugMode, setDebugMode } = useDebugMode()
+
+const debugEnabled = computed({
+  get: () => debugMode.value,
+  set: (val: boolean) => setDebugMode(val)
+})
 
 // Node shape options
 const nodeShapeOptions: { value: NodeShape; label: string; icon: string }[] = [
@@ -78,6 +86,11 @@ const nodeStrokeWidth = computed({
 const nodePadding = computed({
   get: () => treeStyle.value.node.padding,
   set: (val: number) => { treeStyle.value.node.padding = val }
+})
+
+const contourRowStep = computed({
+  get: () => treeStyle.value.layout.contourRowStep,
+  set: (val: number) => { treeStyle.value.layout.contourRowStep = val }
 })
 </script>
 
@@ -239,8 +252,42 @@ const nodePadding = computed({
     </v-expansion-panel>
   </v-expansion-panels>
 
+  <!-- Debug Mode -->
+  <div class="pa-3 debug-section">
+    <v-checkbox
+      v-model="debugEnabled"
+      density="compact"
+      hide-details
+      class="debug-checkbox"
+    >
+      <template #label>
+        <div class="d-flex align-center">
+          <v-icon size="small" class="mr-2" :icon="mdiBug" />
+          <span class="text-caption">Debug Contours</span>
+        </div>
+      </template>
+    </v-checkbox>
+    <div v-if="debugEnabled" class="mt-2 ml-8">
+      <div class="text-caption text-medium-emphasis mb-2">
+        Click nodes or edges to see contours
+      </div>
+      <v-text-field
+        v-model.number="contourRowStep"
+        label="Contour Row Step"
+        type="number"
+        density="compact"
+        variant="outlined"
+        hide-details
+        :min="1"
+        :max="50"
+        suffix="px"
+        class="contour-step-input"
+      />
+    </div>
+  </div>
+
   <!-- Reset Button -->
-  <div class="pa-3">
+  <div class="pa-3 pt-0">
     <v-btn
       variant="outlined"
       size="small"
@@ -267,5 +314,23 @@ const nodePadding = computed({
 
 .style-section :deep(.v-expansion-panel-text__wrapper) {
   padding: 0;
+}
+
+.debug-section {
+  border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+.debug-checkbox :deep(.v-label) {
+  opacity: 1;
+}
+
+.contour-step-input {
+  max-width: 140px;
+}
+
+.contour-step-input :deep(.v-field__input) {
+  min-height: 32px;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 </style>

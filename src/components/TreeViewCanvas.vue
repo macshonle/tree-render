@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { mdiPlus, mdiMinus } from '@mdi/js'
-import type { TreeStyle, TreeExample, LayoutNode } from '@/types'
+import type { TreeStyle, TreeExample, LayoutNode, SkylineContour } from '@/types'
 import { layoutTree, createCanvasTextMeasurer } from '@/layout'
+import { useDebugMode } from '@/composables/useDebugMode'
 
 const props = defineProps<{
   styleConfig: TreeStyle
   treeData?: TreeExample | null
 }>()
+
+const { debugMode, selection, selectNode, selectEdge, clearSelection } = useDebugMode()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -17,6 +20,22 @@ const panOffset = ref({ x: 0, y: 0 })
 const zoom = ref(1)
 const isPanning = ref(false)
 const lastMousePos = ref({ x: 0, y: 0 })
+const mouseDownPos = ref({ x: 0, y: 0 })
+
+// Hover state for debug mode
+type HoverTarget =
+  | { type: 'node'; nodeId: string }
+  | { type: 'edge'; parentId: string; childId: string; childIndex: number }
+  | null
+const hoverTarget = ref<HoverTarget>(null)
+
+// Store the current layout for hit testing
+let currentLayoutRoot: LayoutNode | null = null
+let currentOffsetX = 0
+let currentOffsetY = 50
+
+// Edge hit detection threshold (in canvas pixels before zoom)
+const EDGE_HIT_THRESHOLD = 10
 
 function resizeCanvas() {
   if (containerRef.value && canvasRef.value) {
@@ -77,6 +96,11 @@ function draw() {
   const treeWidth = maxX - minX
   const offsetX = -minX - treeWidth / 2
   const offsetY = 50
+
+  // Store for hit testing
+  currentLayoutRoot = layoutRoot
+  currentOffsetX = offsetX
+  currentOffsetY = offsetY
 
   // Apply transformations
   ctx.save()
@@ -149,7 +173,27 @@ function draw() {
         ctx!.lineTo(rightX, barY)
 
         // Vertical drops from bar to each child
-        for (const child of childEndpoints) {
+        for (let i = 0; i < childEndpoints.length; i++) {
+          const child = childEndpoints[i]
+          // Check if this edge is hovered
+          const isHovered = debugMode.value && hoverTarget.value?.type === 'edge' &&
+            hoverTarget.value.parentId === node.id &&
+            hoverTarget.value.childIndex === i
+
+          if (isHovered) {
+            // Draw highlight for this vertical segment
+            ctx!.stroke() // finish previous path
+            ctx!.save()
+            ctx!.strokeStyle = 'rgba(100, 150, 255, 0.8)'
+            ctx!.lineWidth = edgeStyle.width + 4
+            ctx!.beginPath()
+            ctx!.moveTo(child.x, barY)
+            ctx!.lineTo(child.x, child.y)
+            ctx!.stroke()
+            ctx!.restore()
+            ctx!.beginPath()
+          }
+
           ctx!.moveTo(child.x, barY)
           ctx!.lineTo(child.x, child.y)
         }
@@ -157,18 +201,253 @@ function draw() {
         ctx!.stroke()
       } else {
         // Curve and straight-arrow: draw individual edges
-        for (const child of childEndpoints) {
+        for (let i = 0; i < childEndpoints.length; i++) {
+          const child = childEndpoints[i]
+          // Check if this edge is hovered
+          const isHovered = debugMode.value && hoverTarget.value?.type === 'edge' &&
+            hoverTarget.value.parentId === node.id &&
+            hoverTarget.value.childIndex === i
+
+          if (isHovered) {
+            // Draw highlight behind the edge
+            drawEdgeHighlight(ctx!, parentX, parentBottom, child.x, child.y, edgeStyle)
+          }
+
           drawEdge(ctx!, parentX, parentBottom, child.x, child.y, edgeStyle)
         }
       }
     }
 
     // 3. Draw this node (covers edge starts)
+    // Check if this node is hovered
+    const isHovered = debugMode.value && hoverTarget.value?.type === 'node' &&
+      hoverTarget.value.nodeId === node.id
+
+    if (isHovered) {
+      // Draw highlight behind the node
+      ctx!.save()
+      ctx!.fillStyle = 'rgba(100, 150, 255, 0.3)'
+      ctx!.strokeStyle = 'rgba(100, 150, 255, 0.8)'
+      ctx!.lineWidth = 3
+      const halfW = node.width / 2 + 4
+      const halfH = node.height / 2 + 4
+      ctx!.beginPath()
+      ctx!.roundRect(node.x + offsetX - halfW, node.y - halfH, halfW * 2, halfH * 2, 6)
+      ctx!.fill()
+      ctx!.stroke()
+      ctx!.restore()
+    }
+
     drawNode(ctx!, node.x + offsetX, node.y, node.label, nodeStyle, node.width, node.height)
   }
   drawSubtree(layoutRoot)
 
+  // Draw contours if debug mode is enabled and something is selected
+  if (debugMode.value && selection.value) {
+    drawDebugContours(ctx!, layoutRoot, offsetX, selection.value)
+  }
+
   ctx.restore()
+}
+
+/**
+ * Draw debug contours for the selected node or edge
+ */
+function drawDebugContours(
+  ctx: CanvasRenderingContext2D,
+  root: LayoutNode,
+  offsetX: number,
+  sel: { type: 'node'; nodeId: string } | { type: 'edge'; parentId: string; childId: string; childIndex: number }
+) {
+  if (sel.type === 'node') {
+    // Find the node and draw its contour
+    const node = findNodeById(root, sel.nodeId)
+    if (node?.contour) {
+      // Pass the node's height so we know where the contour starts
+      drawContourPaths(ctx, node.contour, node.x + offsetX, node.y, node.height, 'left', 'rgba(0, 180, 0, 0.9)')
+      drawContourPaths(ctx, node.contour, node.x + offsetX, node.y, node.height, 'right', 'rgba(220, 0, 0, 0.9)')
+    }
+  } else {
+    // Find the parent node
+    const parent = findNodeById(root, sel.parentId)
+    if (!parent) return
+
+    const childIndex = sel.childIndex
+    const children = parent.children
+
+    // For edge selection, show:
+    // - Right contour of left subtree (if exists, or ancestor's left sibling)
+    // - Left contour of right subtree (if exists, or ancestor's right sibling)
+
+    // Left boundary (red): immediate left sibling, or walk up to find ancestor with left sibling
+    if (childIndex > 0 && children[childIndex - 1]?.contour) {
+      const leftChild = children[childIndex - 1]
+      drawContourPaths(ctx, leftChild.contour!, leftChild.x + offsetX, leftChild.y, leftChild.height, 'right', 'rgba(220, 0, 0, 0.9)')
+    } else if (childIndex === 0) {
+      // No immediate left sibling - find ancestor's left sibling
+      const ancestorLeftSibling = findAncestorLeftSibling(root, sel.parentId)
+      if (ancestorLeftSibling?.contour) {
+        drawContourPaths(ctx, ancestorLeftSibling.contour, ancestorLeftSibling.x + offsetX, ancestorLeftSibling.y, ancestorLeftSibling.height, 'right', 'rgba(220, 0, 0, 0.9)')
+      }
+    }
+
+    // Right boundary (green): the selected child's left contour
+    if (childIndex < children.length && children[childIndex]?.contour) {
+      const rightChild = children[childIndex]
+      drawContourPaths(ctx, rightChild.contour!, rightChild.x + offsetX, rightChild.y, rightChild.height, 'left', 'rgba(0, 180, 0, 0.9)')
+    }
+  }
+}
+
+/**
+ * Find the nearest ancestor that has a left sibling, and return that left sibling.
+ * This is used when a node is the leftmost child - we walk up to find the
+ * subtree that forms the left boundary.
+ */
+function findAncestorLeftSibling(root: LayoutNode, nodeId: string): LayoutNode | null {
+  // Build path from root to nodeId
+  const path = findPathToNode(root, nodeId)
+  if (!path || path.length < 2) return null
+
+  // Walk up the path (excluding the target node itself)
+  // path[0] is root, path[path.length-1] is the target
+  for (let i = path.length - 1; i >= 1; i--) {
+    const node = path[i]
+    const parent = path[i - 1]
+
+    // Find node's index among parent's children
+    const nodeIndex = parent.children.findIndex(c => c.id === node.id)
+    if (nodeIndex > 0) {
+      // Found an ancestor with a left sibling
+      return parent.children[nodeIndex - 1]
+    }
+  }
+
+  return null
+}
+
+/**
+ * Find the path from root to a node with the given ID.
+ * Returns array of nodes from root to target, or null if not found.
+ */
+function findPathToNode(node: LayoutNode, targetId: string, path: LayoutNode[] = []): LayoutNode[] | null {
+  const currentPath = [...path, node]
+
+  if (node.id === targetId) {
+    return currentPath
+  }
+
+  for (const child of node.children) {
+    const result = findPathToNode(child, targetId, currentPath)
+    if (result) return result
+  }
+
+  return null
+}
+
+/**
+ * Draw the left or right contour as a solid path with dots at inflection points
+ */
+function drawContourPaths(
+  ctx: CanvasRenderingContext2D,
+  contour: SkylineContour,
+  nodeX: number,
+  nodeY: number,
+  nodeHeight: number,
+  side: 'left' | 'right',
+  color: string
+) {
+  const xValues = side === 'left' ? contour.left : contour.right
+  if (xValues.length === 0) return
+
+  // Use the rowStep that was stored with the contour during layout
+  // This ensures consistent rendering regardless of current UI setting
+  const rowStep = contour.rowStep
+
+  // The contour starts at the top of the root node (nodeY - nodeHeight/2)
+  // Row 0 corresponds to that y position
+  const startY = nodeY - nodeHeight / 2
+
+  // Collect valid points and identify inflection points
+  const points: { x: number; y: number; isInflection: boolean }[] = []
+  let prevX: number | null = null
+
+  for (let i = 0; i < xValues.length; i++) {
+    const x = xValues[i]
+    if (!isFinite(x)) continue
+
+    const y = startY + i * rowStep
+    const actualX = nodeX + x
+
+    // Check if this is an inflection point (x changed from previous)
+    const isInflection = prevX !== null && Math.abs(actualX - prevX) > 0.5
+    points.push({ x: actualX, y, isInflection })
+    prevX = actualX
+  }
+
+  if (points.length === 0) return
+
+  // Draw the solid line (skyline style - horizontal then vertical)
+  ctx.save()
+  ctx.strokeStyle = color
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.beginPath()
+
+  ctx.moveTo(points[0].x, points[0].y)
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1]
+    const curr = points[i]
+
+    if (curr.isInflection) {
+      // Draw skyline style: horizontal first, then vertical
+      ctx.lineTo(prev.x, curr.y)
+      ctx.lineTo(curr.x, curr.y)
+    } else {
+      ctx.lineTo(curr.x, curr.y)
+    }
+  }
+
+  ctx.stroke()
+
+  // Draw dots at inflection points and endpoints
+  ctx.fillStyle = color
+  const dotRadius = 4
+
+  // Start point
+  ctx.beginPath()
+  ctx.arc(points[0].x, points[0].y, dotRadius, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Inflection points
+  for (const point of points) {
+    if (point.isInflection) {
+      ctx.beginPath()
+      ctx.arc(point.x, point.y, dotRadius, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  // End point
+  const lastPoint = points[points.length - 1]
+  ctx.beginPath()
+  ctx.arc(lastPoint.x, lastPoint.y, dotRadius, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.restore()
+}
+
+/**
+ * Find a node by ID in the layout tree
+ */
+function findNodeById(node: LayoutNode, id: string): LayoutNode | null {
+  if (node.id === id) return node
+  for (const child of node.children) {
+    const found = findNodeById(child, id)
+    if (found) return found
+  }
+  return null
 }
 
 function drawCheckerboard(ctx: CanvasRenderingContext2D, width: number, height: number) {
@@ -348,11 +627,56 @@ function drawEdge(
   ctx.stroke()
 }
 
-// Mouse event handlers for pan
+/**
+ * Draw a highlight behind an edge (for hover effect)
+ */
+function drawEdgeHighlight(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  style: TreeStyle['edge']
+) {
+  ctx.save()
+  ctx.strokeStyle = 'rgba(100, 150, 255, 0.8)'
+  ctx.lineWidth = style.width + 4
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  ctx.beginPath()
+
+  switch (style.style) {
+    case 'curve':
+      ctx.moveTo(x1, y1)
+      const cpY = (y1 + y2) / 2
+      ctx.bezierCurveTo(x1, cpY, x2, cpY, x2, y2)
+      break
+
+    case 'straight-arrow':
+      ctx.moveTo(x1, y1)
+      ctx.lineTo(x2, y2)
+      break
+
+    case 'org-chart':
+      const midY = (y1 + y2) / 2
+      ctx.moveTo(x1, y1)
+      ctx.lineTo(x1, midY)
+      ctx.lineTo(x2, midY)
+      ctx.lineTo(x2, y2)
+      break
+  }
+
+  ctx.stroke()
+  ctx.restore()
+}
+
+// Mouse event handlers for pan, hover, and click
 function handleMouseDown(e: MouseEvent) {
   if (e.button === 0) { // Left click
     isPanning.value = true
     lastMousePos.value = { x: e.clientX, y: e.clientY }
+    mouseDownPos.value = { x: e.clientX, y: e.clientY }
   }
 }
 
@@ -364,11 +688,279 @@ function handleMouseMove(e: MouseEvent) {
     panOffset.value.y += dy
     lastMousePos.value = { x: e.clientX, y: e.clientY }
     draw()
+  } else if (debugMode.value) {
+    // Not panning - do hover hit testing
+    updateHover(e)
   }
 }
 
-function handleMouseUp() {
+function handleMouseUp(e: MouseEvent) {
+  if (isPanning.value) {
+    // Check if this was a click (minimal movement) vs a drag
+    const dx = e.clientX - mouseDownPos.value.x
+    const dy = e.clientY - mouseDownPos.value.y
+    const distance = Math.sqrt(dx * dx + dy * dy)
+
+    if (distance < 5 && debugMode.value) {
+      // This was a click - do hit testing
+      handleClick(e)
+    }
+  }
   isPanning.value = false
+}
+
+function handleMouseLeave() {
+  isPanning.value = false
+  if (hoverTarget.value) {
+    hoverTarget.value = null
+    draw()
+  }
+}
+
+/**
+ * Update hover state based on mouse position
+ */
+function updateHover(e: MouseEvent) {
+  if (!currentLayoutRoot || !canvasRef.value) {
+    if (hoverTarget.value) {
+      hoverTarget.value = null
+      draw()
+    }
+    return
+  }
+
+  const { treeX, treeY } = screenToTreeCoords(e)
+
+  // Check for node hover
+  const hitNode = findNodeAtPoint(currentLayoutRoot, treeX, treeY)
+  if (hitNode) {
+    const newTarget: HoverTarget = { type: 'node', nodeId: hitNode.id }
+    if (!hoverTarget.value || hoverTarget.value.type !== 'node' || hoverTarget.value.nodeId !== hitNode.id) {
+      hoverTarget.value = newTarget
+      updateCursor('pointer')
+      draw()
+    }
+    return
+  }
+
+  // Check for edge hover
+  const hitEdge = findEdgeAtPoint(currentLayoutRoot, treeX, treeY, props.styleConfig.edge.style)
+  if (hitEdge) {
+    const newTarget: HoverTarget = { type: 'edge', ...hitEdge }
+    if (!hoverTarget.value || hoverTarget.value.type !== 'edge' ||
+        hoverTarget.value.parentId !== hitEdge.parentId ||
+        hoverTarget.value.childIndex !== hitEdge.childIndex) {
+      hoverTarget.value = newTarget
+      updateCursor('pointer')
+      draw()
+    }
+    return
+  }
+
+  // Nothing hovered
+  if (hoverTarget.value) {
+    hoverTarget.value = null
+    updateCursor('grab')
+    draw()
+  }
+}
+
+/**
+ * Convert screen coordinates to tree coordinates
+ */
+function screenToTreeCoords(e: MouseEvent): { treeX: number; treeY: number } {
+  const canvas = canvasRef.value!
+  const rect = canvas.getBoundingClientRect()
+
+  const canvasX = (e.clientX - rect.left) * (canvas.width / rect.width)
+  const canvasY = (e.clientY - rect.top) * (canvas.height / rect.height)
+
+  const treeX = (canvasX - canvas.width / 2 - panOffset.value.x) / zoom.value - currentOffsetX
+  const treeY = (canvasY - currentOffsetY - panOffset.value.y) / zoom.value
+
+  return { treeX, treeY }
+}
+
+/**
+ * Update cursor style
+ */
+function updateCursor(cursor: 'grab' | 'pointer') {
+  if (containerRef.value) {
+    containerRef.value.style.cursor = cursor
+  }
+}
+
+/**
+ * Handle click for node/edge selection in debug mode
+ */
+function handleClick(e: MouseEvent) {
+  if (!currentLayoutRoot || !canvasRef.value) return
+
+  const { treeX, treeY } = screenToTreeCoords(e)
+
+  // First check for node hits
+  const hitNode = findNodeAtPoint(currentLayoutRoot, treeX, treeY)
+  if (hitNode) {
+    selectNode(hitNode.id)
+    draw()
+    return
+  }
+
+  // Then check for edge hits
+  const hitEdge = findEdgeAtPoint(currentLayoutRoot, treeX, treeY, props.styleConfig.edge.style)
+  if (hitEdge) {
+    selectEdge(hitEdge.parentId, hitEdge.childId, hitEdge.childIndex)
+    draw()
+    return
+  }
+}
+
+/**
+ * Find a node at the given point (in tree coordinates)
+ */
+function findNodeAtPoint(node: LayoutNode, x: number, y: number): LayoutNode | null {
+  // Check if point is inside this node's bounding box
+  const halfW = node.width / 2
+  const halfH = node.height / 2
+  if (x >= node.x - halfW && x <= node.x + halfW &&
+      y >= node.y - halfH && y <= node.y + halfH) {
+    return node
+  }
+
+  // Check children (in reverse order so topmost nodes are checked first)
+  for (let i = node.children.length - 1; i >= 0; i--) {
+    const found = findNodeAtPoint(node.children[i], x, y)
+    if (found) return found
+  }
+
+  return null
+}
+
+/**
+ * Find an edge at the given point (in tree coordinates)
+ */
+function findEdgeAtPoint(
+  node: LayoutNode,
+  x: number,
+  y: number,
+  edgeStyle: 'curve' | 'straight-arrow' | 'org-chart'
+): { parentId: string; childId: string; childIndex: number } | null {
+  // Check edges from this node to its children
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i]
+
+    const parentY = node.y + node.height / 2
+    const childY = child.y - child.height / 2
+
+    // Check if y is in the vertical range of the edge
+    if (y >= parentY - EDGE_HIT_THRESHOLD && y <= childY + EDGE_HIT_THRESHOLD) {
+      let hit = false
+
+      switch (edgeStyle) {
+        case 'org-chart': {
+          // For org-chart: only check the vertical segment below the horizontal bar
+          // (as per user's suggestion - more meaningful interaction)
+          const barY = (parentY + childY) / 2
+
+          // Check vertical segment from bar to child only
+          if (Math.abs(x - child.x) < EDGE_HIT_THRESHOLD && y >= barY && y <= childY) {
+            hit = true
+          }
+          break
+        }
+
+        case 'straight-arrow': {
+          // Check distance to line segment
+          const dist = distanceToLineSegment(x, y, node.x, parentY, child.x, childY)
+          if (dist < EDGE_HIT_THRESHOLD) {
+            hit = true
+          }
+          break
+        }
+
+        case 'curve': {
+          // Check distance to bezier curve (approximate with samples)
+          const dist = distanceToBezier(x, y, node.x, parentY, child.x, childY)
+          if (dist < EDGE_HIT_THRESHOLD) {
+            hit = true
+          }
+          break
+        }
+      }
+
+      if (hit) {
+        return { parentId: node.id, childId: child.id, childIndex: i }
+      }
+    }
+  }
+
+  // Recursively check children
+  for (const child of node.children) {
+    const found = findEdgeAtPoint(child, x, y, edgeStyle)
+    if (found) return found
+  }
+
+  return null
+}
+
+/**
+ * Calculate distance from point to line segment
+ */
+function distanceToLineSegment(
+  px: number, py: number,
+  x1: number, y1: number,
+  x2: number, y2: number
+): number {
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const lengthSq = dx * dx + dy * dy
+
+  if (lengthSq === 0) {
+    // Line segment is a point
+    return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2)
+  }
+
+  // Project point onto line, clamped to segment
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSq))
+  const projX = x1 + t * dx
+  const projY = y1 + t * dy
+
+  return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2)
+}
+
+/**
+ * Calculate approximate distance from point to bezier curve
+ * Uses sampling along the curve
+ */
+function distanceToBezier(
+  px: number, py: number,
+  x1: number, y1: number,
+  x2: number, y2: number
+): number {
+  // Control points for the bezier (same as in drawEdge)
+  const cpY = (y1 + y2) / 2
+
+  let minDist = Infinity
+  const samples = 20
+
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples
+    // Cubic bezier formula: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+    // Our bezier: P0=(x1,y1), P1=(x1,cpY), P2=(x2,cpY), P3=(x2,y2)
+    const mt = 1 - t
+    const mt2 = mt * mt
+    const mt3 = mt2 * mt
+    const t2 = t * t
+    const t3 = t2 * t
+
+    const bx = mt3 * x1 + 3 * mt2 * t * x1 + 3 * mt * t2 * x2 + t3 * x2
+    const by = mt3 * y1 + 3 * mt2 * t * cpY + 3 * mt * t2 * cpY + t3 * y2
+
+    const dist = Math.sqrt((px - bx) ** 2 + (py - by) ** 2)
+    minDist = Math.min(minDist, dist)
+  }
+
+  return minDist
 }
 
 function handleWheel(e: WheelEvent) {
@@ -384,9 +976,16 @@ function resetView() {
   draw()
 }
 
-// Watch for style and tree data changes and redraw
+// Watch for style, tree data, and debug state changes and redraw
 watch(() => props.styleConfig, draw, { deep: true })
-watch(() => props.treeData, draw, { deep: true })
+watch(() => props.treeData, () => {
+  // Clear selection when switching examples (even if node IDs match, it's a different tree)
+  clearSelection()
+  hoverTarget.value = null
+  draw()
+}, { deep: true })
+watch(() => debugMode.value, draw)
+watch(() => selection.value, draw, { deep: true })
 
 // ResizeObserver for reliable initial sizing
 let resizeObserver: ResizeObserver | null = null
@@ -427,7 +1026,7 @@ onUnmounted(() => {
     @mousedown="handleMouseDown"
     @mousemove="handleMouseMove"
     @mouseup="handleMouseUp"
-    @mouseleave="handleMouseUp"
+    @mouseleave="handleMouseLeave"
   >
     <canvas
       ref="canvasRef"

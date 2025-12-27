@@ -12,7 +12,10 @@ export type {
   LayoutResult,
   LaidOutChild,
   SubtreeBounds,
+  SkylineContour,
 } from './types'
+
+export { DEFAULT_CONTOUR_ROW_STEP } from './types'
 
 /**
  * Registry of available layout algorithms
