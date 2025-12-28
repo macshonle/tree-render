@@ -801,3 +801,425 @@ describe('buildSubtreeContour - deep subtree preservation', () => {
     expect(hasDeepPoints).toBe(true)
   })
 })
+
+// ============================================================================
+// Tests that would have failed before the detail-preserving union fix
+// ============================================================================
+
+describe('unionContours - detail preservation edge cases', () => {
+  it('preserves all inflection points from rightmost contour on right boundary', () => {
+    // Before the fix: union computed envelope (min/max) losing internal detail
+    // After the fix: preserves ALL points from dominant contour
+
+    // Create a contour with multiple inflection points (zigzag pattern)
+    const zigzagContour: YMonotonePolygon = {
+      left: [
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+      ],
+      right: [
+        { x: 50, y: 0 },    // start wide
+        { x: 50, y: 20 },
+        { x: 30, y: 20 },   // inward dip
+        { x: 30, y: 40 },
+        { x: 50, y: 40 },   // back out
+        { x: 50, y: 60 },
+        { x: 20, y: 60 },   // deeper inward dip
+        { x: 20, y: 80 },
+        { x: 50, y: 80 },   // back out again
+        { x: 50, y: 100 },
+      ],
+    }
+
+    // Create a simple contour to the left that won't affect right boundary
+    const simpleContour: YMonotonePolygon = {
+      left: [
+        { x: -50, y: 0 },
+        { x: -50, y: 100 },
+      ],
+      right: [
+        { x: -30, y: 0 },
+        { x: -30, y: 100 },
+      ],
+    }
+
+    const union = unionContours([simpleContour, zigzagContour])
+
+    // The right boundary should preserve ALL inflection points from zigzagContour
+    // Check for the inward dips at y=20 and y=60
+    const dipAt20 = union.right.find(p => p.y === 20 && p.x === 30)
+    const dipAt60 = union.right.find(p => p.y === 60 && p.x === 20)
+
+    expect(dipAt20).toBeDefined()
+    expect(dipAt60).toBeDefined()
+
+    // Verify point count - should have similar number of points as the zigzag
+    expect(union.right.length).toBeGreaterThanOrEqual(zigzagContour.right.length - 2)
+  })
+
+  it('handles three contours with interleaved dominance on left boundary', () => {
+    // Three contours where left boundary dominance changes:
+    // y=0-45: contour A is leftmost (starts at x=-100, interpolates toward -50)
+    // y=45-55: contour B is leftmost (at x=-80)
+    // y=70-100: contour C is leftmost (at x=-90)
+
+    const contourA: YMonotonePolygon = {
+      left: [
+        { x: -100, y: 0 },  // leftmost at top
+        { x: -50, y: 50 },  // moves right
+        { x: -50, y: 100 },
+      ],
+      right: [
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+      ],
+    }
+
+    const contourB: YMonotonePolygon = {
+      left: [
+        { x: -60, y: 0 },
+        { x: -60, y: 45 },
+        { x: -80, y: 45 },  // leftmost in middle section
+        { x: -80, y: 55 },
+        { x: -60, y: 55 },
+        { x: -60, y: 100 },
+      ],
+      right: [
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+      ],
+    }
+
+    const contourC: YMonotonePolygon = {
+      left: [
+        { x: -40, y: 0 },
+        { x: -40, y: 70 },
+        { x: -90, y: 70 },  // leftmost at bottom
+        { x: -90, y: 100 },
+      ],
+      right: [
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+      ],
+    }
+
+    const union = unionContours([contourA, contourB, contourC])
+
+    // Verify the union contains the key inflection points from each dominant contour
+    const topPoint = union.left.find(p => p.y === 0)
+    expect(topPoint?.x).toBe(-100)
+
+    // The union should include contourB's leftmost point at y=45
+    // Note: Due to algorithm design, there may be a transition point before it
+    const hasContourBInflection = union.left.some(p => p.y === 45 && p.x === -80)
+    expect(hasContourBInflection).toBe(true)
+
+    // The union should include contourC's leftmost point at y=70
+    const bottomPoint = union.left.find(p => p.y >= 70 && p.x === -90)
+    expect(bottomPoint).toBeDefined()
+
+    // Verify the union encompasses all input bounds
+    const unionBounds = getContourBounds(union)
+    expect(unionBounds.left).toBe(-100)  // leftmost from contourA
+    expect(unionBounds.bottom).toBe(100)
+  })
+
+  it('handles contours that share exact y-breakpoints', () => {
+    // Two contours with points at exactly the same y-coordinates
+    // This tests that we handle the edge case where multiple contours
+    // have explicit points at the same y-level
+
+    const contourA: YMonotonePolygon = {
+      left: [
+        { x: -50, y: 0 },
+        { x: -50, y: 50 },  // explicit point at y=50
+        { x: -50, y: 100 },
+      ],
+      right: [
+        { x: -30, y: 0 },
+        { x: -30, y: 100 },
+      ],
+    }
+
+    const contourB: YMonotonePolygon = {
+      left: [
+        { x: 30, y: 0 },
+        { x: 30, y: 50 },   // also has explicit point at y=50
+        { x: 30, y: 100 },
+      ],
+      right: [
+        { x: 50, y: 0 },
+        { x: 50, y: 50 },   // and on right boundary
+        { x: 50, y: 100 },
+      ],
+    }
+
+    const union = unionContours([contourA, contourB])
+
+    // Should not have duplicate points at y=50
+    const leftPointsAt50 = union.left.filter(p => p.y === 50)
+    const rightPointsAt50 = union.right.filter(p => p.y === 50)
+
+    expect(leftPointsAt50.length).toBe(1)
+    expect(rightPointsAt50.length).toBe(1)
+    expect(leftPointsAt50[0].x).toBe(-50)  // leftmost
+    expect(rightPointsAt50[0].x).toBe(50)  // rightmost
+  })
+
+  it('handles horizontal segments at dominance transition', () => {
+    // Contour with horizontal segment exactly where dominance changes
+    // This tests the interaction between horizontal segments and dominance transitions
+
+    const contourWithHorizontal: YMonotonePolygon = {
+      left: [
+        { x: -50, y: 0 },
+        { x: -50, y: 50 },
+        { x: -30, y: 50 },  // horizontal segment at y=50
+        { x: -30, y: 100 },
+      ],
+      right: [
+        { x: 50, y: 0 },
+        { x: 50, y: 100 },
+      ],
+    }
+
+    const simpleContour: YMonotonePolygon = {
+      left: [
+        { x: -40, y: 30 },   // starts at y=30, goes left of horizontal at y=50
+        { x: -60, y: 50 },   // leftmost at y=50
+        { x: -60, y: 80 },
+      ],
+      right: [
+        { x: 0, y: 30 },
+        { x: 0, y: 80 },
+      ],
+    }
+
+    const union = unionContours([contourWithHorizontal, simpleContour])
+
+    // The union should include simpleContour's leftmost point at y=50
+    const hasLeftmostAt50 = union.left.some(p => p.y === 50 && p.x === -60)
+    expect(hasLeftmostAt50).toBe(true)
+
+    // Verify the union bounds encompass both contours
+    const bounds = getContourBounds(union)
+    expect(bounds.left).toBeLessThanOrEqual(-60)  // should include simpleContour's leftmost
+    expect(bounds.top).toBe(0)    // from contourWithHorizontal
+    expect(bounds.bottom).toBe(100)  // from contourWithHorizontal
+  })
+
+  it('preserves detail when one contour is entirely within another y-range', () => {
+    // Outer contour spans y=0-100
+    // Inner contour spans y=30-70 but extends further left in that range
+
+    const outerContour: YMonotonePolygon = {
+      left: [
+        { x: -30, y: 0 },
+        { x: -30, y: 100 },
+      ],
+      right: [
+        { x: 30, y: 0 },
+        { x: 30, y: 100 },
+      ],
+    }
+
+    const innerContour: YMonotonePolygon = {
+      left: [
+        { x: -50, y: 30 },   // extends further left
+        { x: -50, y: 50 },
+        { x: -70, y: 50 },   // even further left
+        { x: -70, y: 70 },
+      ],
+      right: [
+        { x: 0, y: 30 },
+        { x: 0, y: 70 },
+      ],
+    }
+
+    const union = unionContours([outerContour, innerContour])
+
+    // At y=0-30: should follow outerContour (x=-30)
+    const topPoint = union.left[0]
+    expect(topPoint.x).toBe(-30)
+    expect(topPoint.y).toBe(0)
+
+    // At y=30-70: should follow innerContour with its inflection
+    const inflectionPoint = union.left.find(p => p.y === 50 && p.x === -70)
+    expect(inflectionPoint).toBeDefined()
+
+    // At y=70-100: should return to outerContour (x=-30)
+    const bottomSection = union.left.filter(p => p.y >= 70)
+    const hasOuterAtBottom = bottomSection.some(p => p.x === -30)
+    expect(hasOuterAtBottom).toBe(true)
+  })
+})
+
+// ============================================================================
+// Property-based invariant tests
+// ============================================================================
+
+describe('Y-monotone polygon invariants', () => {
+  /**
+   * Helper to verify Y-monotonicity: points should be ordered by increasing y
+   */
+  function verifyYMonotonicity(boundary: { x: number; y: number }[], name: string): void {
+    for (let i = 1; i < boundary.length; i++) {
+      expect(
+        boundary[i].y >= boundary[i - 1].y,
+        `${name}: y should be non-decreasing, but y[${i-1}]=${boundary[i-1].y} > y[${i}]=${boundary[i].y}`
+      ).toBe(true)
+    }
+  }
+
+  /**
+   * Helper to verify no duplicate consecutive points
+   */
+  function verifyNoDuplicates(boundary: { x: number; y: number }[], name: string): void {
+    for (let i = 1; i < boundary.length; i++) {
+      const isDupe = boundary[i].x === boundary[i - 1].x && boundary[i].y === boundary[i - 1].y
+      expect(
+        isDupe,
+        `${name}: duplicate point at index ${i}: (${boundary[i].x}, ${boundary[i].y})`
+      ).toBe(false)
+    }
+  }
+
+  it('createNodeContour produces valid Y-monotone polygon', () => {
+    const contour = createNodeContour(100, 50)
+
+    verifyYMonotonicity(contour.left, 'left')
+    verifyYMonotonicity(contour.right, 'right')
+    verifyNoDuplicates(contour.left, 'left')
+    verifyNoDuplicates(contour.right, 'right')
+  })
+
+  it('translateContour preserves Y-monotonicity', () => {
+    const original = createNodeContour(100, 50)
+    const translated = translateContour(original, 200, -100)
+
+    verifyYMonotonicity(translated.left, 'left')
+    verifyYMonotonicity(translated.right, 'right')
+    verifyNoDuplicates(translated.left, 'left')
+    verifyNoDuplicates(translated.right, 'right')
+  })
+
+  it('unionContours preserves Y-monotonicity for arbitrary contour combinations', () => {
+    // Test with various contour configurations
+    const testCases: YMonotonePolygon[][] = [
+      // Two simple rectangles
+      [
+        translateContour(createNodeContour(40, 40), -30, 0),
+        translateContour(createNodeContour(40, 40), 30, 0),
+      ],
+      // Three rectangles at different y-levels
+      [
+        translateContour(createNodeContour(30, 30), 0, -40),
+        translateContour(createNodeContour(30, 30), -30, 0),
+        translateContour(createNodeContour(30, 30), 30, 40),
+      ],
+      // Complex nested contours
+      [
+        {
+          left: [{ x: -50, y: 0 }, { x: -50, y: 100 }],
+          right: [{ x: -30, y: 0 }, { x: -30, y: 100 }],
+        },
+        {
+          left: [{ x: -20, y: 20 }, { x: -40, y: 50 }, { x: -40, y: 80 }],
+          right: [{ x: 20, y: 20 }, { x: 20, y: 80 }],
+        },
+        {
+          left: [{ x: 30, y: 0 }, { x: 30, y: 100 }],
+          right: [{ x: 50, y: 0 }, { x: 50, y: 100 }],
+        },
+      ],
+    ]
+
+    for (let i = 0; i < testCases.length; i++) {
+      const union = unionContours(testCases[i])
+      verifyYMonotonicity(union.left, `case ${i} left`)
+      verifyYMonotonicity(union.right, `case ${i} right`)
+      verifyNoDuplicates(union.left, `case ${i} left`)
+      verifyNoDuplicates(union.right, `case ${i} right`)
+    }
+  })
+
+  it('buildSubtreeContour preserves Y-monotonicity for all edge styles', () => {
+    const childContour = createNodeContour(30, 30)
+    const edgeStyles: Array<'curve' | 'straight-arrow' | 'org-chart'> = [
+      'curve',
+      'straight-arrow',
+      'org-chart'
+    ]
+
+    for (const edgeStyle of edgeStyles) {
+      const contour = buildSubtreeContour(
+        50,
+        40,
+        [
+          { contour: childContour, offsetX: -30, offsetY: 60, width: 30, height: 30 },
+          { contour: childContour, offsetX: 30, offsetY: 60, width: 30, height: 30 },
+        ],
+        edgeStyle
+      )
+
+      verifyYMonotonicity(contour.left, `${edgeStyle} left`)
+      verifyYMonotonicity(contour.right, `${edgeStyle} right`)
+      verifyNoDuplicates(contour.left, `${edgeStyle} left`)
+      verifyNoDuplicates(contour.right, `${edgeStyle} right`)
+    }
+  })
+
+  it('union bounds encompass all input contour bounds', () => {
+    const contours = [
+      translateContour(createNodeContour(40, 40), -50, -20),
+      translateContour(createNodeContour(60, 30), 30, 10),
+      translateContour(createNodeContour(30, 50), 0, 50),
+    ]
+
+    const union = unionContours(contours)
+    const unionBounds = getContourBounds(union)
+
+    for (const contour of contours) {
+      const bounds = getContourBounds(contour)
+      expect(unionBounds.left).toBeLessThanOrEqual(bounds.left)
+      expect(unionBounds.right).toBeGreaterThanOrEqual(bounds.right)
+      expect(unionBounds.top).toBeLessThanOrEqual(bounds.top)
+      expect(unionBounds.bottom).toBeGreaterThanOrEqual(bounds.bottom)
+    }
+  })
+
+  it('inflection point count does not decrease when building parent contour', () => {
+    // Key invariant: parent contour should have >= inflection points as children
+    // (we're adding parent edge geometry on top of child detail)
+
+    const grandchildContour = createNodeContour(20, 20)
+
+    // Build child subtree with edge geometry
+    const childContour = buildSubtreeContour(
+      40,
+      30,
+      [
+        { contour: grandchildContour, offsetX: -20, offsetY: 50, width: 20, height: 20 },
+        { contour: grandchildContour, offsetX: 20, offsetY: 50, width: 20, height: 20 },
+      ],
+      'straight-arrow'
+    )
+
+    const childInflections = childContour.right.length
+
+    // Build parent with this child
+    const parentContour = buildSubtreeContour(
+      60,
+      40,
+      [
+        { contour: childContour, offsetX: 0, offsetY: 70, width: 40, height: 30 },
+      ],
+      'straight-arrow'
+    )
+
+    const parentInflections = parentContour.right.length
+
+    // Parent should have at least as many points (more, since we add parent geometry)
+    expect(parentInflections).toBeGreaterThanOrEqual(childInflections)
+  })
+})

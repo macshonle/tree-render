@@ -11,6 +11,20 @@
 import type { ContourPoint, YMonotonePolygon, EdgeContourStyle } from './types'
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Small epsilon for y-coordinate comparisons.
+ * Used when filtering union boundary points to exclude points at exactly
+ * the child's top edge (which are handled by edge geometry instead).
+ *
+ * This value should be smaller than any meaningful coordinate difference
+ * but larger than floating point precision errors.
+ */
+const Y_EPSILON = 0.001
+
+// ============================================================================
 // Contour Creation
 // ============================================================================
 
@@ -232,7 +246,7 @@ function buildCurveEdgeContour(
   // Add rest of the UNION's left boundary (skip points above the connection)
   // Include all points to retain full detail for layout calculations
   for (const p of childrenUnion.left) {
-    if (p.y > leftChildTop + 0.5) {
+    if (p.y > leftChildTop + Y_EPSILON) {
       left.push(p)
     }
   }
@@ -251,7 +265,7 @@ function buildCurveEdgeContour(
   // Add rest of the UNION's right boundary (skip points above the connection)
   // Include all points to retain full detail for layout calculations
   for (const p of childrenUnion.right) {
-    if (p.y > rightChildTop + 0.5) {
+    if (p.y > rightChildTop + Y_EPSILON) {
       right.push(p)
     }
   }
@@ -301,7 +315,7 @@ function buildArrowEdgeContour(
   // Add union's left boundary points BELOW the child's top
   // Include all points to retain full detail for layout calculations
   for (const p of childrenUnion.left) {
-    if (p.y > leftChildTop + 0.5) {
+    if (p.y > leftChildTop + Y_EPSILON) {
       left.push(p)
     }
   }
@@ -326,7 +340,7 @@ function buildArrowEdgeContour(
   // Add union's right boundary points BELOW the child's top
   // Include all points to retain full detail for layout calculations
   for (const p of childrenUnion.right) {
-    if (p.y > rightChildTop + 0.5) {
+    if (p.y > rightChildTop + Y_EPSILON) {
       right.push(p)
     }
   }
@@ -385,7 +399,7 @@ function buildOrgChartEdgeContour(
   // Add union's left boundary points BELOW the child's top
   // Include all points to retain full detail for layout calculations
   for (const p of childrenUnion.left) {
-    if (p.y > leftChildTop + 0.5) {
+    if (p.y > leftChildTop + Y_EPSILON) {
       left.push(p)
     }
   }
@@ -408,7 +422,7 @@ function buildOrgChartEdgeContour(
   // Add union's right boundary points BELOW the child's top
   // Include all points to retain full detail for layout calculations
   for (const p of childrenUnion.right) {
-    if (p.y > rightChildTop + 0.5) {
+    if (p.y > rightChildTop + Y_EPSILON) {
       right.push(p)
     }
   }
@@ -712,43 +726,6 @@ function interpolateRightBoundaryX(boundary: ContourPoint[], y: number): number 
   return isFinite(maxX) ? maxX : null
 }
 
-/**
- * Interpolate the x-coordinate of a contour boundary at a given y.
- * For generic use (e.g., gap detection) - returns the first matching x.
- *
- * @param boundary Array of points forming the boundary (ordered by increasing y)
- * @param y The y-coordinate to query
- * @returns The x-coordinate at y, or null if y is outside the boundary's y-range
- */
-function interpolateContourX(boundary: ContourPoint[], y: number): number | null {
-  if (boundary.length === 0) return null
-
-  const firstY = boundary[0].y
-  const lastY = boundary[boundary.length - 1].y
-
-  // Outside range
-  if (y < firstY || y > lastY) return null
-
-  // Find the segment containing y
-  for (let i = 0; i < boundary.length - 1; i++) {
-    const p1 = boundary[i]
-    const p2 = boundary[i + 1]
-
-    if (y >= p1.y && y <= p2.y) {
-      // Linear interpolation
-      if (p2.y === p1.y) {
-        // Horizontal segment - return either endpoint
-        return p1.x
-      }
-      const t = (y - p1.y) / (p2.y - p1.y)
-      return p1.x + t * (p2.x - p1.x)
-    }
-  }
-
-  // Exactly at the last point
-  return boundary[boundary.length - 1].x
-}
-
 // ============================================================================
 // Intersection Detection (for subtree placement)
 // ============================================================================
@@ -799,11 +776,15 @@ export function findMinHorizontalGap(
   const sortedYs = Array.from(yBreakpoints).sort((a, b) => a - b)
 
   // Find minimum gap
+  // Use the specialized interpolation functions that return the correct extreme values:
+  // - For left contour's RIGHT boundary: we want the MAX x (rightmost point)
+  // - For right contour's LEFT boundary: we want the MIN x (leftmost point)
+  // This ensures correct gap calculation even for horizontal segments
   let minGap = Infinity
 
   for (const y of sortedYs) {
-    const leftRightX = interpolateContourX(leftContour.right, y)
-    const rightLeftX = interpolateContourX(rightContour.left, y)
+    const leftRightX = interpolateRightBoundaryX(leftContour.right, y)
+    const rightLeftX = interpolateLeftBoundaryX(rightContour.left, y)
 
     if (leftRightX !== null && rightLeftX !== null) {
       const gap = rightLeftX - leftRightX
