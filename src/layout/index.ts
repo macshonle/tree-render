@@ -2,6 +2,8 @@ import type { TreeNode, LayoutNode, TreeStyle, TreeExample, LayoutAlgorithmType 
 import type { LayoutAlgorithm, LayoutContext, LayoutResult, LaidOutChild, TextMeasurer } from './types'
 import { maxwidthLayout } from './algorithms/maxwidth'
 import { topAlignLayout } from './algorithms/topAlign'
+import { lrSqueezeLayout } from './algorithms/lrSqueeze'
+import { rlSqueezeLayout } from './algorithms/rlSqueeze'
 
 // Re-export types for convenience
 export type {
@@ -20,6 +22,8 @@ export type {
 const algorithms: Record<LayoutAlgorithmType, LayoutAlgorithm> = {
   'maxwidth': maxwidthLayout,
   'top-align': topAlignLayout,
+  'lr-squeeze': lrSqueezeLayout,
+  'rl-squeeze': rlSqueezeLayout,
 }
 
 /**
@@ -110,4 +114,6 @@ export function layoutTree(
 export const layoutAlgorithmLabels: Record<LayoutAlgorithmType, string> = {
   'maxwidth': 'Centered',
   'top-align': 'Top Align',
+  'lr-squeeze': 'LR Squeeze',
+  'rl-squeeze': 'RL Squeeze',
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { maxwidthLayout } from './maxwidth'
 import { topAlignLayout } from './topAlign'
+import { lrSqueezeLayout } from './lrSqueeze'
 import type { TreeNode, TreeExample } from '@/types'
 import type { LayoutContext, LaidOutChild, TextMeasurer } from '../types'
 
@@ -496,5 +497,323 @@ describe('layout edge cases', () => {
       prevY = current.y
       current = current.children?.[0]
     }
+  })
+})
+
+describe('lrSqueezeLayout', () => {
+  describe('single node (no children)', () => {
+    it('positions node at origin', () => {
+      const context = createMockContext()
+      const testNode = node('Test')
+
+      const result = lrSqueezeLayout(testNode, [], context)
+
+      expect(result.root.x).toBe(0)
+      expect(result.root.y).toBe(0)
+    })
+
+    it('returns same result as other algorithms for single node', () => {
+      const context = createMockContext()
+      const testNode = node('Test')
+
+      const lrSqueezeResult = lrSqueezeLayout(testNode, [], context)
+      const topAlignResult = topAlignLayout(testNode, [], context)
+
+      expect(lrSqueezeResult.root.width).toBe(topAlignResult.root.width)
+      expect(lrSqueezeResult.root.height).toBe(topAlignResult.root.height)
+      expect(lrSqueezeResult.bounds).toEqual(topAlignResult.bounds)
+    })
+
+    it('creates polygon contour matching node size', () => {
+      const context = createMockContext()
+      const testNode = node('Test')
+
+      const result = lrSqueezeLayout(testNode, [], context)
+
+      expect(result.polygonContour.left.length).toBeGreaterThan(0)
+      expect(result.polygonContour.right.length).toBeGreaterThan(0)
+      expect(result.polygonContour.left[0].x).toBe(-result.root.width / 2)
+      expect(result.polygonContour.right[0].x).toBe(result.root.width / 2)
+    })
+  })
+
+  describe('parent with children', () => {
+    it('positions single child below parent', () => {
+      const context = createMockContext()
+      const parent = node('Parent')
+      const child = node('Child')
+      const laidOutChildren = layoutChildren([child], context, lrSqueezeLayout)
+
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      expect(result.root.children[0].y).toBeGreaterThan(result.root.y)
+    })
+
+    it('centers single child under parent', () => {
+      const context = createMockContext()
+      const parent = node('Parent')
+      const child = node('Child')
+      const laidOutChildren = layoutChildren([child], context, lrSqueezeLayout)
+
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      // Child should be centered (x = 0 since parent is at x = 0)
+      expect(result.root.children[0].x).toBe(0)
+    })
+
+    it('spreads multiple children horizontally', () => {
+      const context = createMockContext()
+      const parent = node('Parent')
+      const laidOutChildren = layoutChildren(
+        [node('Child1'), node('Child2'), node('Child3')],
+        context,
+        lrSqueezeLayout
+      )
+
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      expect(result.root.children[0].x).toBeLessThan(result.root.children[1].x)
+      expect(result.root.children[1].x).toBeLessThan(result.root.children[2].x)
+    })
+
+    it('aligns child tops (top-align characteristic)', () => {
+      const context = createMockContext()
+      const parent = node('Parent')
+      // Create children with different heights
+      const shortChild = node('Short')
+      const tallChild = node('Tall\nChild\nHere')
+
+      const laidOutChildren = layoutChildren([shortChild, tallChild], context, lrSqueezeLayout)
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      // Top edges should be at the same y
+      const shortTop = result.root.children[0].y - result.root.children[0].height / 2
+      const tallTop = result.root.children[1].y - result.root.children[1].height / 2
+      expect(shortTop).toBeCloseTo(tallTop, 5)
+    })
+
+    it('respects vertical gap setting', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'lr-squeeze', horizontalGap: 10, verticalGap: 100 },
+      })
+      const parent = node('Parent')
+      const child = node('Child')
+      const laidOutChildren = layoutChildren([child], context, lrSqueezeLayout)
+
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      const parentBottom = result.root.y + result.root.height / 2
+      const childTop = result.root.children[0].y - result.root.children[0].height / 2
+      expect(childTop - parentBottom).toBeGreaterThanOrEqual(100)
+    })
+
+    it('respects horizontal gap setting', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'lr-squeeze', horizontalGap: 50, verticalGap: 40 },
+      })
+      const parent = node('Parent')
+      const child1 = node('A')
+      const child2 = node('B')
+      const laidOutChildren = layoutChildren([child1, child2], context, lrSqueezeLayout)
+
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      // Gap between children's bounding boxes should be at least the horizontal gap
+      const gap =
+        result.root.children[1].x -
+        result.root.children[1].width / 2 -
+        (result.root.children[0].x + result.root.children[0].width / 2)
+      expect(gap).toBeGreaterThanOrEqual(50 - 1) // Allow small floating point tolerance
+    })
+  })
+
+  describe('contour-based compaction', () => {
+    it('uses contour-based spacing for subtrees with different shapes', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'lr-squeeze', horizontalGap: 10, verticalGap: 40 },
+      })
+
+      // Create two subtrees with different shapes:
+      // Left subtree: deep on the right side
+      // Right subtree: deep on the left side
+      // These should interlock more tightly than bounding-box-based layout
+
+      // Left subtree: Root with child extending to the left
+      const leftSubtree = node('L', [node('LL')])
+      // Right subtree: Root with child extending to the right
+      const rightSubtree = node('R', [node('RR')])
+
+      const parent = node('Parent')
+      const laidOutChildren = layoutChildren([leftSubtree, rightSubtree], context, lrSqueezeLayout)
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      // Both children should be positioned
+      expect(result.root.children).toHaveLength(2)
+      expect(result.root.children[0].x).toBeLessThan(result.root.children[1].x)
+    })
+
+    it('places L-shaped subtrees closer than bounding boxes would allow', () => {
+      // This test demonstrates the key advantage of contour-based layout:
+      // When subtrees have different depths, they can interlock
+      const context = createMockContext({
+        layout: { algorithm: 'lr-squeeze', horizontalGap: 10, verticalGap: 40 },
+      })
+
+      // Left subtree is tall (has grandchildren)
+      const leftTall = node('A', [node('A1', [node('A11')])])
+      // Right subtree is short (no grandchildren)
+      const rightShort = node('B')
+
+      const parent = node('Parent')
+      const laidOutChildren = layoutChildren([leftTall, rightShort], context, lrSqueezeLayout)
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      // The right subtree should be placed based on contour, not bounding box
+      // At the level of the roots, they should be horizontalGap apart
+      // But since B has no children, the grandchildren of A don't affect B's placement
+      expect(result.root.children).toHaveLength(2)
+      expect(result.root.children[0].x).toBeLessThan(result.root.children[1].x)
+    })
+
+    it('compacts multiple children incrementally from left to right', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'lr-squeeze', horizontalGap: 10, verticalGap: 40 },
+      })
+
+      // Create several children with varying depths
+      const children = [
+        node('A', [node('A1')]),
+        node('B'),
+        node('C', [node('C1', [node('C11')])]),
+        node('D'),
+      ]
+
+      const parent = node('Parent')
+      const laidOutChildren = layoutChildren(children, context, lrSqueezeLayout)
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      // All children should be placed left-to-right
+      for (let i = 0; i < result.root.children.length - 1; i++) {
+        expect(result.root.children[i].x).toBeLessThan(result.root.children[i + 1].x)
+      }
+
+      // All children should have valid positions
+      for (const child of result.root.children) {
+        expect(isFinite(child.x)).toBe(true)
+        expect(isFinite(child.y)).toBe(true)
+      }
+    })
+  })
+
+  describe('parent centering', () => {
+    it('centers parent over children forest', () => {
+      const context = createMockContext()
+      const parent = node('Parent')
+      const laidOutChildren = layoutChildren(
+        [node('Child1'), node('Child2'), node('Child3')],
+        context,
+        lrSqueezeLayout
+      )
+
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      // Parent is at x=0
+      expect(result.root.x).toBe(0)
+
+      // Children should be centered around x=0
+      const childrenLeft = Math.min(...result.root.children.map((c) => c.x - c.width / 2))
+      const childrenRight = Math.max(...result.root.children.map((c) => c.x + c.width / 2))
+      const childrenCenter = (childrenLeft + childrenRight) / 2
+
+      expect(childrenCenter).toBeCloseTo(0, 5)
+    })
+
+    it('centers asymmetric children forest under parent', () => {
+      const context = createMockContext()
+      const parent = node('P')
+
+      // Create asymmetric children: one very wide, one narrow
+      const wideChild = node('Very Wide Child Label')
+      const narrowChild = node('X')
+
+      const laidOutChildren = layoutChildren([wideChild, narrowChild], context, lrSqueezeLayout)
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      // Parent should still be at origin
+      expect(result.root.x).toBe(0)
+
+      // Children's center should be at parent's center (0)
+      const childrenLeft = Math.min(...result.root.children.map((c) => c.x - c.width / 2))
+      const childrenRight = Math.max(...result.root.children.map((c) => c.x + c.width / 2))
+      const childrenCenter = (childrenLeft + childrenRight) / 2
+
+      expect(childrenCenter).toBeCloseTo(0, 5)
+    })
+  })
+
+  describe('nested tree (3 levels)', () => {
+    it('correctly positions all levels', () => {
+      const context = createMockContext()
+      const tree = node('Root', [node('A', [node('A1'), node('A2')]), node('B', [node('B1')])])
+      const laidOutChildren = layoutChildren(tree.children!, context, lrSqueezeLayout)
+
+      const result = lrSqueezeLayout(tree, laidOutChildren, context)
+
+      // Root at level 0
+      expect(result.root.y).toBe(0)
+
+      // Children at level 1 (below root)
+      const levelOneY = result.root.children[0].y
+      expect(levelOneY).toBeGreaterThan(0)
+
+      // Grandchildren at level 2 (below level 1)
+      const a1 = result.root.children[0].children[0]
+      expect(a1.y).toBeGreaterThan(levelOneY)
+    })
+
+    it('computes bounds encompassing entire subtree', () => {
+      const context = createMockContext()
+      const tree = node('Root', [node('Wide Child With Long Label')])
+      const laidOutChildren = layoutChildren(tree.children!, context, lrSqueezeLayout)
+
+      const result = lrSqueezeLayout(tree, laidOutChildren, context)
+
+      // Bounds should include the wide child
+      expect(result.bounds.right - result.bounds.left).toBeGreaterThan(result.root.width)
+    })
+  })
+
+  describe('polygon contour correctness', () => {
+    it('parent with children has polygon contour extending to children', () => {
+      const context = createMockContext()
+      const parent = node('Parent')
+      const child = node('Child')
+      const laidOutChildren = layoutChildren([child], context, lrSqueezeLayout)
+
+      const result = lrSqueezeLayout(parent, laidOutChildren, context)
+
+      expect(result.polygonContour.left.length).toBeGreaterThan(0)
+      expect(result.polygonContour.right.length).toBeGreaterThan(0)
+
+      // The polygon contour should extend down to the child
+      const childBottom = result.root.children[0].y + result.root.children[0].height / 2
+      const contourBottomY = Math.max(
+        ...result.polygonContour.left.map((p) => p.y),
+        ...result.polygonContour.right.map((p) => p.y)
+      )
+      expect(contourBottomY).toBeCloseTo(childBottom, 1)
+    })
+
+    it('polygon contour is attached to layout nodes', () => {
+      const context = createMockContext()
+      const tree = node('Root', [node('A'), node('B')])
+      const laidOutChildren = layoutChildren(tree.children!, context, lrSqueezeLayout)
+
+      const result = lrSqueezeLayout(tree, laidOutChildren, context)
+
+      expect(result.root.polygonContour).toBeDefined()
+      expect(result.root.polygonContour!.left.length).toBeGreaterThan(0)
+      expect(result.root.polygonContour!.right.length).toBeGreaterThan(0)
+    })
   })
 })

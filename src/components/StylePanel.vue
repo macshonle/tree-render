@@ -41,10 +41,12 @@ const edgeStyleOptions: { value: EdgeStyle; label: string; icon: string }[] = [
   { value: 'org-chart', label: 'Org Chart', icon: mdiSitemapOutline }
 ]
 
-// Layout algorithm options
+// Layout algorithm options (2x2 grid)
 const layoutAlgorithmOptions: { value: LayoutAlgorithmType; label: string }[] = [
   { value: 'maxwidth', label: 'Centered' },
-  { value: 'top-align', label: 'Top Align' }
+  { value: 'top-align', label: 'Top Align' },
+  { value: 'lr-squeeze', label: 'LR Squeeze' },
+  { value: 'rl-squeeze', label: 'RL Squeeze' }
 ]
 
 // Computed bindings for v-model
@@ -196,21 +198,18 @@ const nodePadding = computed({
       <v-expansion-panel-text>
         <div class="pa-2">
           <div class="text-caption mb-2">Algorithm</div>
-          <v-btn-toggle
-            v-model="layoutAlgorithm"
-            mandatory
-            density="compact"
-            class="mb-3"
-          >
+          <div class="algorithm-grid mb-3">
             <v-btn
               v-for="algo in layoutAlgorithmOptions"
               :key="algo.value"
-              :value="algo.value"
+              :variant="layoutAlgorithm === algo.value ? 'flat' : 'outlined'"
+              :color="layoutAlgorithm === algo.value ? 'primary' : undefined"
               size="small"
+              @click="layoutAlgorithm = algo.value"
             >
               {{ algo.label }}
             </v-btn>
-          </v-btn-toggle>
+          </div>
 
           <v-slider
             v-model="horizontalGap"
@@ -315,5 +314,15 @@ const nodePadding = computed({
   min-height: 32px;
   padding-top: 4px;
   padding-bottom: 4px;
+}
+
+.algorithm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.algorithm-grid .v-btn {
+  min-width: 0;
 }
 </style>

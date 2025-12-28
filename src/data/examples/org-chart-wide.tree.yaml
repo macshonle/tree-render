@@ -23,9 +23,9 @@ tree:
                         children:
                           - node: d5 end
       - node: "Middle\nSpacer"
-        children:
-          - node: m1
-          - node: m2
+        # children:
+        #   - node: m1
+        #   - node: m2
       - node: Fan-out
         children:
           - node: Child 0
