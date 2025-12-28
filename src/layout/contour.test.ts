@@ -8,6 +8,7 @@ import {
   unionContours,
   findMinHorizontalGap,
   calculatePlacementOffset,
+  mergeContoursWithGap,
   type ChildContourInfo,
 } from './contour'
 import type { YMonotonePolygon } from './types'
@@ -508,6 +509,458 @@ describe('calculatePlacementOffset', () => {
     // No y-overlap, should use bounding box calculation
     const offset = calculatePlacementOffset(left, right, 10)
     expect(offset).toBeGreaterThan(0)
+  })
+})
+
+// ============================================================================
+// Comprehensive gap detection and placement tests
+// ============================================================================
+
+describe('findMinHorizontalGap - comprehensive', () => {
+  it('finds gap at the narrowest point between contours with outward spike', () => {
+    // Left contour has an outward spike on its right boundary
+    // This creates a point where the contours are CLOSEST
+    const leftContour: YMonotonePolygon = {
+      left: [
+        { x: -50, y: 0 },
+        { x: -50, y: 100 },
+      ],
+      right: [
+        { x: 10, y: 0 },
+        { x: 10, y: 40 },
+        { x: 30, y: 40 },   // outward spike - this is the closest point
+        { x: 30, y: 60 },
+        { x: 10, y: 60 },
+        { x: 10, y: 100 },
+      ],
+    }
+
+    // Right contour is a simple rectangle at origin
+    const rightContour = createNodeContour(40, 100)  // left edge at -20
+
+    const gap = findMinHorizontalGap(leftContour, rightContour)
+
+    // Gap should be measured at the spike (y=40-60) where left's right edge is at x=30
+    // and right's left edge is at x=-20
+    // Gap = -20 - 30 = -50 (most overlap)
+    // At other y-levels, left's right edge is at x=10, so gap = -20 - 10 = -30
+    expect(gap).toBe(-50)  // Minimum gap is at the outward spike
+  })
+
+  it('finds gap when right contour has outward bulge', () => {
+    // Left contour is a simple rectangle
+    const leftContour = translateContour(createNodeContour(40, 100), -30, 0)
+    // Left's right edge is at -30 + 20 = -10
+
+    // Right contour has an outward bulge on its left boundary
+    const rightContour: YMonotonePolygon = {
+      left: [
+        { x: 20, y: 0 },
+        { x: 20, y: 40 },
+        { x: 0, y: 40 },    // outward bulge - closest to left contour
+        { x: 0, y: 60 },
+        { x: 20, y: 60 },
+        { x: 20, y: 100 },
+      ],
+      right: [
+        { x: 50, y: 0 },
+        { x: 50, y: 100 },
+      ],
+    }
+
+    const gap = findMinHorizontalGap(leftContour, rightContour)
+
+    // Gap at the bulge (y=40-60): right's left edge at x=0, left's right edge at x=-10
+    // Gap = 0 - (-10) = 10
+    expect(gap).toBe(10)
+  })
+
+  it('handles partial y-overlap correctly', () => {
+    // Left contour spans y=0 to y=50
+    const leftContour = translateContour(createNodeContour(40, 50), 0, 0)
+    // top = -25, bottom = 25
+
+    // Right contour spans y=20 to y=70 (overlaps from y=20 to y=25)
+    const rightContour = translateContour(createNodeContour(40, 50), 50, 45)
+    // top = 45 - 25 = 20, bottom = 45 + 25 = 70
+
+    const gap = findMinHorizontalGap(leftContour, rightContour)
+
+    // Left's right edge at x=20, right's left edge at x=50-20=30
+    // Gap = 30 - 20 = 10
+    expect(gap).toBe(10)
+  })
+
+  it('correctly handles horizontal segments on both boundaries', () => {
+    // Left contour with horizontal segment on right boundary
+    const leftContour: YMonotonePolygon = {
+      left: [
+        { x: -30, y: 0 },
+        { x: -30, y: 100 },
+      ],
+      right: [
+        { x: 10, y: 0 },
+        { x: 10, y: 50 },
+        { x: 20, y: 50 },   // horizontal segment extending right
+        { x: 20, y: 100 },
+      ],
+    }
+
+    // Right contour with horizontal segment on left boundary
+    const rightContour: YMonotonePolygon = {
+      left: [
+        { x: 40, y: 0 },
+        { x: 30, y: 50 },   // horizontal segment extending left
+        { x: 30, y: 50 },
+        { x: 40, y: 100 },
+      ],
+      right: [
+        { x: 60, y: 0 },
+        { x: 60, y: 100 },
+      ],
+    }
+
+    const gap = findMinHorizontalGap(leftContour, rightContour)
+
+    // At y=50: left's right edge at x=20 (max of horizontal), right's left edge at x=30 (min)
+    // Gap = 30 - 20 = 10
+    expect(gap).toBe(10)
+  })
+
+  it('samples gap at all y-breakpoints for accuracy', () => {
+    // Create contours where the minimum gap occurs at a specific y-breakpoint
+    const leftContour: YMonotonePolygon = {
+      left: [
+        { x: -50, y: 0 },
+        { x: -50, y: 100 },
+      ],
+      right: [
+        { x: 0, y: 0 },
+        { x: 0, y: 33 },
+        { x: 15, y: 33 },   // spike outward at y=33
+        { x: 15, y: 34 },
+        { x: 0, y: 34 },
+        { x: 0, y: 100 },
+      ],
+    }
+
+    const rightContour = translateContour(createNodeContour(20, 100), 30, 0)
+    // right's left edge at x=20
+
+    const gap = findMinHorizontalGap(leftContour, rightContour)
+
+    // Gap at spike (y=33-34): left's right at x=15, right's left at x=20
+    // Gap = 20 - 15 = 5
+    expect(gap).toBe(5)
+  })
+})
+
+describe('calculatePlacementOffset - comprehensive', () => {
+  it('places contours exactly at desired gap when overlapping', () => {
+    const left = translateContour(createNodeContour(40, 40), 0, 0)
+    const right = translateContour(createNodeContour(40, 40), 10, 0)  // overlapping
+
+    // Current gap: right's left at -10, left's right at 20. Gap = -10 - 20 = -30
+    const offset = calculatePlacementOffset(left, right, 15)
+
+    // Apply offset and verify
+    const translatedRight = translateContour(right, offset, 0)
+    const newGap = findMinHorizontalGap(left, translatedRight)
+
+    expect(newGap).toBe(15)
+  })
+
+  it('places contours exactly at desired gap when already separated', () => {
+    const left = translateContour(createNodeContour(40, 40), -50, 0)
+    const right = translateContour(createNodeContour(40, 40), 50, 0)
+
+    // Current gap: right's left at 30, left's right at -30. Gap = 30 - (-30) = 60
+    const offset = calculatePlacementOffset(left, right, 10)
+
+    // Apply offset and verify
+    const translatedRight = translateContour(right, offset, 0)
+    const newGap = findMinHorizontalGap(left, translatedRight)
+
+    expect(newGap).toBe(10)
+  })
+
+  it('handles zero gap correctly', () => {
+    const left = translateContour(createNodeContour(40, 40), 0, 0)
+    const right = createNodeContour(40, 40)
+
+    const offset = calculatePlacementOffset(left, right, 0)
+    const translatedRight = translateContour(right, offset, 0)
+    const newGap = findMinHorizontalGap(left, translatedRight)
+
+    expect(newGap).toBe(0)
+  })
+
+  it('handles contours with complex geometry', () => {
+    // Left contour with edge geometry
+    const leftContour = buildSubtreeContour(
+      40, 30,
+      [
+        { contour: createNodeContour(30, 20), offsetX: 0, offsetY: 50, width: 30, height: 20 },
+      ],
+      'straight-arrow'
+    )
+
+    // Right contour with edge geometry
+    const rightContour = buildSubtreeContour(
+      40, 30,
+      [
+        { contour: createNodeContour(30, 20), offsetX: 0, offsetY: 50, width: 30, height: 20 },
+      ],
+      'straight-arrow'
+    )
+
+    const offset = calculatePlacementOffset(leftContour, rightContour, 20)
+    const translatedRight = translateContour(rightContour, offset, 0)
+    const newGap = findMinHorizontalGap(leftContour, translatedRight)
+
+    // Should achieve exactly the desired gap
+    expect(newGap).toBe(20)
+  })
+
+  it('returns correct offset for non-overlapping y-ranges', () => {
+    const left = translateContour(createNodeContour(40, 40), 0, 0)  // y: -20 to 20
+    const right = translateContour(createNodeContour(40, 40), 0, 100)  // y: 80 to 120
+
+    const offset = calculatePlacementOffset(left, right, 15)
+
+    // No y-overlap, so offset is based on bounding boxes
+    // left's right = 20, right's left = -20
+    // offset = 20 - (-20) + 15 = 55
+    expect(offset).toBe(55)
+  })
+})
+
+describe('mergeContoursWithGap', () => {
+  it('merges two simple contours with specified gap', () => {
+    const left = translateContour(createNodeContour(40, 40), -30, 0)
+    const right = createNodeContour(40, 40)
+
+    const { merged, rightOffset } = mergeContoursWithGap(left, right, 10)
+
+    // Verify the merged contour encompasses both
+    const leftBounds = getContourBounds(left)
+    const mergedBounds = getContourBounds(merged)
+
+    expect(mergedBounds.left).toBe(leftBounds.left)  // left edge from left contour
+
+    // Verify the gap is achieved
+    const translatedRight = translateContour(right, rightOffset, 0)
+    const gap = findMinHorizontalGap(left, translatedRight)
+    expect(gap).toBe(10)
+  })
+
+  it('preserves detail from both contours in merged result', () => {
+    // Left contour with complex geometry
+    const leftContour: YMonotonePolygon = {
+      left: [
+        { x: -50, y: 0 },
+        { x: -50, y: 50 },
+        { x: -60, y: 50 },  // outward bulge
+        { x: -60, y: 60 },
+        { x: -50, y: 60 },
+        { x: -50, y: 100 },
+      ],
+      right: [
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+      ],
+    }
+
+    // Right contour with its own geometry
+    const rightContour: YMonotonePolygon = {
+      left: [
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+      ],
+      right: [
+        { x: 50, y: 0 },
+        { x: 50, y: 30 },
+        { x: 60, y: 30 },   // outward bulge
+        { x: 60, y: 40 },
+        { x: 50, y: 40 },
+        { x: 50, y: 100 },
+      ],
+    }
+
+    const { merged, rightOffset } = mergeContoursWithGap(leftContour, rightContour, 20)
+
+    // Left boundary should have the bulge at y=50-60
+    const hasLeftBulge = merged.left.some(p => p.x === -60)
+    expect(hasLeftBulge).toBe(true)
+
+    // Right boundary should have the bulge (translated by rightOffset)
+    const hasRightBulge = merged.right.some(p => p.x === 60 + rightOffset)
+    expect(hasRightBulge).toBe(true)
+  })
+
+  it('returns correct offset value', () => {
+    const left = translateContour(createNodeContour(40, 40), 0, 0)
+    const right = createNodeContour(40, 40)
+
+    // left's right edge at 20, right's left edge at -20
+    // Current gap = -20 - 20 = -40 (overlapping by 40)
+    // To get gap of 10, need offset of 10 - (-40) = 50
+
+    const { rightOffset } = mergeContoursWithGap(left, right, 10)
+
+    expect(rightOffset).toBe(50)
+  })
+
+  it('handles contours at different y-levels', () => {
+    const left = translateContour(createNodeContour(40, 60), 0, 0)   // y: -30 to 30
+    const right = translateContour(createNodeContour(40, 40), 0, 50) // y: 30 to 70
+
+    const { merged } = mergeContoursWithGap(left, right, 15)
+
+    const mergedBounds = getContourBounds(merged)
+
+    // Should span the full y-range of both contours
+    expect(mergedBounds.top).toBe(-30)
+    expect(mergedBounds.bottom).toBe(70)
+  })
+
+  it('merged contour satisfies minimum gap invariant', () => {
+    // Property test: after merging, findMinHorizontalGap should return exactly the gap
+    const testCases = [
+      { leftX: -50, rightX: 50, gap: 10 },
+      { leftX: 0, rightX: 0, gap: 25 },
+      { leftX: -100, rightX: -50, gap: 5 },
+    ]
+
+    for (const { leftX, rightX, gap } of testCases) {
+      const left = translateContour(createNodeContour(40, 40), leftX, 0)
+      const right = translateContour(createNodeContour(40, 40), rightX, 0)
+
+      const { rightOffset } = mergeContoursWithGap(left, right, gap)
+      const translatedRight = translateContour(right, rightOffset, 0)
+      const actualGap = findMinHorizontalGap(left, translatedRight)
+
+      expect(actualGap).toBe(gap)
+    }
+  })
+})
+
+describe('gap functions with edge geometry contours', () => {
+  it('correctly computes gap between subtrees with straight-arrow edges', () => {
+    // Build two subtrees with straight-arrow edge geometry
+    const leafContour = createNodeContour(30, 30)
+
+    const leftSubtree = buildSubtreeContour(
+      50, 40,
+      [
+        { contour: leafContour, offsetX: -20, offsetY: 60, width: 30, height: 30 },
+        { contour: leafContour, offsetX: 20, offsetY: 60, width: 30, height: 30 },
+      ],
+      'straight-arrow'
+    )
+
+    const rightSubtree = buildSubtreeContour(
+      50, 40,
+      [
+        { contour: leafContour, offsetX: -20, offsetY: 60, width: 30, height: 30 },
+        { contour: leafContour, offsetX: 20, offsetY: 60, width: 30, height: 30 },
+      ],
+      'straight-arrow'
+    )
+
+    // Position left subtree
+    const positionedLeft = translateContour(leftSubtree, -60, 0)
+
+    // Find the gap - should account for the inward dips from edge geometry
+    const gap = findMinHorizontalGap(positionedLeft, rightSubtree)
+
+    // Verify gap is a reasonable value (not null, accounts for geometry)
+    expect(gap).not.toBeNull()
+    expect(typeof gap).toBe('number')
+  })
+
+  it('correctly computes gap between subtrees with org-chart edges', () => {
+    const leafContour = createNodeContour(30, 30)
+
+    const leftSubtree = buildSubtreeContour(
+      50, 40,
+      [
+        { contour: leafContour, offsetX: -25, offsetY: 60, width: 30, height: 30 },
+        { contour: leafContour, offsetX: 25, offsetY: 60, width: 30, height: 30 },
+      ],
+      'org-chart'
+    )
+
+    const rightSubtree = buildSubtreeContour(
+      50, 40,
+      [
+        { contour: leafContour, offsetX: -25, offsetY: 60, width: 30, height: 30 },
+        { contour: leafContour, offsetX: 25, offsetY: 60, width: 30, height: 30 },
+      ],
+      'org-chart'
+    )
+
+    // Merge with specified gap
+    const { merged, rightOffset } = mergeContoursWithGap(leftSubtree, rightSubtree, 15)
+
+    // Verify the gap is achieved
+    const translatedRight = translateContour(rightSubtree, rightOffset, 0)
+    const actualGap = findMinHorizontalGap(leftSubtree, translatedRight)
+
+    expect(actualGap).toBe(15)
+
+    // Verify merged contour is valid
+    expect(merged.left.length).toBeGreaterThan(0)
+    expect(merged.right.length).toBeGreaterThan(0)
+  })
+
+  it('gap accounts for deep nested subtrees', () => {
+    // Build a deep subtree structure
+    const leafContour = createNodeContour(20, 20)
+
+    // Level 2: two children
+    const level2 = buildSubtreeContour(
+      30, 25,
+      [
+        { contour: leafContour, offsetX: -15, offsetY: 40, width: 20, height: 20 },
+        { contour: leafContour, offsetX: 15, offsetY: 40, width: 20, height: 20 },
+      ],
+      'straight-arrow'
+    )
+
+    // Level 1: parent with level2 as child
+    const level1Left = buildSubtreeContour(
+      40, 30,
+      [
+        { contour: level2, offsetX: 0, offsetY: 55, width: 30, height: 25 },
+      ],
+      'straight-arrow'
+    )
+
+    const level1Right = buildSubtreeContour(
+      40, 30,
+      [
+        { contour: level2, offsetX: 0, offsetY: 55, width: 30, height: 25 },
+      ],
+      'straight-arrow'
+    )
+
+    // Merge the two level1 subtrees
+    const { rightOffset } = mergeContoursWithGap(level1Left, level1Right, 12)
+
+    // Verify the gap at all levels
+    const translatedRight = translateContour(level1Right, rightOffset, 0)
+    const actualGap = findMinHorizontalGap(level1Left, translatedRight)
+
+    // The gap should be exactly 12 at the closest point
+    expect(actualGap).toBe(12)
+
+    // The merged contour should extend to the full depth
+    const { merged } = mergeContoursWithGap(level1Left, level1Right, 12)
+    const mergedBounds = getContourBounds(merged)
+    const leftBounds = getContourBounds(level1Left)
+
+    expect(mergedBounds.bottom).toBe(leftBounds.bottom)
   })
 })
 

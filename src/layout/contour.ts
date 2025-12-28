@@ -821,3 +821,32 @@ export function calculatePlacementOffset(
   // Shift right contour so that minGap becomes desiredGap
   return desiredGap - currentGap
 }
+
+/**
+ * Merge two contours with a specified gap between them.
+ *
+ * This function:
+ * 1. Calculates the offset needed to place rightContour adjacent to leftContour
+ *    with the specified gap
+ * 2. Translates rightContour by that offset
+ * 3. Returns the union of both contours
+ *
+ * The result is a single contour that encompasses both input contours,
+ * preserving all detail from both boundaries.
+ *
+ * @param leftContour The left subtree's contour (positioned)
+ * @param rightContour The right subtree's contour (at its current position)
+ * @param gap The minimum gap to maintain between contours
+ * @returns Object containing the merged contour and the offset applied to rightContour
+ */
+export function mergeContoursWithGap(
+  leftContour: YMonotonePolygon,
+  rightContour: YMonotonePolygon,
+  gap: number
+): { merged: YMonotonePolygon; rightOffset: number } {
+  const offset = calculatePlacementOffset(leftContour, rightContour, gap)
+  const translatedRight = translateContour(rightContour, offset, 0)
+  const merged = unionContours([leftContour, translatedRight])
+
+  return { merged, rightOffset: offset }
+}
