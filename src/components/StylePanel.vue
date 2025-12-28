@@ -87,11 +87,6 @@ const nodePadding = computed({
   get: () => treeStyle.value.node.padding,
   set: (val: number) => { treeStyle.value.node.padding = val }
 })
-
-const contourRowStep = computed({
-  get: () => treeStyle.value.layout.contourRowStep,
-  set: (val: number) => { treeStyle.value.layout.contourRowStep = val }
-})
 </script>
 
 <template>
@@ -271,18 +266,6 @@ const contourRowStep = computed({
       <div class="text-caption text-medium-emphasis mb-2">
         Click nodes or edges to see contours
       </div>
-      <v-text-field
-        v-model.number="contourRowStep"
-        label="Contour Row Step"
-        type="number"
-        density="compact"
-        variant="outlined"
-        hide-details
-        :min="1"
-        :max="50"
-        suffix="px"
-        class="contour-step-input"
-      />
     </div>
   </div>
 

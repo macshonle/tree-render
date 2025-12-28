@@ -12,10 +12,7 @@ export type {
   LayoutResult,
   LaidOutChild,
   SubtreeBounds,
-  SkylineContour,
 } from './types'
-
-export { DEFAULT_CONTOUR_ROW_STEP } from './types'
 
 /**
  * Registry of available layout algorithms
@@ -95,6 +92,7 @@ export function layoutTree(
     treeData,
     layout: style.layout,
     padding: style.node.padding,
+    edgeStyle: style.edge.style,
   }
 
   // For now, use the same algorithm for all nodes.

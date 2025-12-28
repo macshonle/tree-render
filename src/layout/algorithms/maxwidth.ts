@@ -7,10 +7,12 @@ import {
   mergeBounds,
   nodeBounds,
   calculateChildrenTotalWidth,
-  contourFromNodeBox,
-  mergeContours,
-  cloneContour,
 } from '../utils'
+import {
+  createNodeContour,
+  buildSubtreeContour,
+  type ChildContourInfo,
+} from '../contour'
 
 /**
  * Centered layout algorithm.
@@ -28,11 +30,8 @@ export const maxwidthLayout: LayoutAlgorithm = (
   children: LaidOutChild[],
   context
 ): LayoutResult => {
-  const { horizontalGap, verticalGap, contourRowStep } = context.layout
+  const { horizontalGap, verticalGap } = context.layout
   const nodeSize = calculateNodeSize(node, context)
-
-  // Create contour for this node
-  const nodeContour = contourFromNodeBox(nodeSize.width, nodeSize.height, contourRowStep)
 
   // Position current node at origin (will be translated by parent)
   const layoutNode: LayoutNode = {
@@ -45,13 +44,16 @@ export const maxwidthLayout: LayoutAlgorithm = (
     children: [],
   }
 
+  // Create polygon contour for this node
+  const nodePolygonContour = createNodeContour(nodeSize.width, nodeSize.height)
+
   // If no children, bounds and contour are just this node
   if (children.length === 0) {
-    layoutNode.contour = nodeContour
+    layoutNode.polygonContour = nodePolygonContour
     return {
       root: layoutNode,
       bounds: nodeBounds(nodeSize.width, nodeSize.height),
-      contour: nodeContour,
+      polygonContour: nodePolygonContour,
     }
   }
 
@@ -75,9 +77,7 @@ export const maxwidthLayout: LayoutAlgorithm = (
   let currentX = -totalChildrenWidth / 2
   const positionedChildren: LayoutNode[] = []
   const childBoundsList: SubtreeBounds[] = []
-
-  // Start with the node's own contour, then merge children
-  const subtreeContour = cloneContour(nodeContour)
+  const childContourInfos: ChildContourInfo[] = []
 
   for (let i = 0; i < children.length; i++) {
     const child = children[i]
@@ -100,18 +100,28 @@ export const maxwidthLayout: LayoutAlgorithm = (
     // Track the translated bounds
     childBoundsList.push(translateBounds(childBounds, childOffsetX, childOffsetY))
 
-    // Merge child contour into subtree contour
-    // Contours are indexed from the TOP of the node, not the center.
-    // childOffsetY is center-to-center, but we need top-to-top for contour merging:
-    // contourDy = (childTop) - (parentTop) = (childOffsetY - childHeight/2) - (-parentHeight/2)
-    const contourDy = childOffsetY - childLayout.root.height / 2 + nodeSize.height / 2
-    mergeContours(subtreeContour, childLayout.contour, childOffsetX, contourDy, contourRowStep)
+    // Collect child contour info for polygon contour building
+    childContourInfos.push({
+      contour: childLayout.polygonContour,
+      offsetX: childOffsetX,
+      offsetY: childOffsetY,
+      width: childLayout.root.width,
+      height: childLayout.root.height,
+    })
 
     currentX += childWidth + horizontalGap
   }
 
+  // Build edge-aware polygon contour for this subtree
+  const subtreePolygonContour = buildSubtreeContour(
+    nodeSize.width,
+    nodeSize.height,
+    childContourInfos,
+    context.edgeStyle
+  )
+
   layoutNode.children = positionedChildren
-  layoutNode.contour = subtreeContour
+  layoutNode.polygonContour = subtreePolygonContour
 
   // Compute overall bounds: union of this node's bounds and all children's bounds
   const overallBounds = mergeBounds([
@@ -119,5 +129,5 @@ export const maxwidthLayout: LayoutAlgorithm = (
     ...childBoundsList,
   ])
 
-  return { root: layoutNode, bounds: overallBounds, contour: subtreeContour }
+  return { root: layoutNode, bounds: overallBounds, polygonContour: subtreePolygonContour }
 }

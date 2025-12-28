@@ -44,9 +44,9 @@ function createMockContext(overrides: Partial<LayoutContext> = {}): LayoutContex
       algorithm: 'maxwidth',
       horizontalGap: 10,
       verticalGap: 40,
-      contourRowStep: 4,
     },
     padding: 10,
+    edgeStyle: 'org-chart',
     ...overrides,
   }
 }
@@ -110,16 +110,17 @@ describe('maxwidthLayout', () => {
       expect(result.bounds.bottom).toBe(result.root.height / 2)
     })
 
-    it('creates contour matching node size', () => {
+    it('creates polygon contour matching node size', () => {
       const context = createMockContext()
       const testNode = node('Test')
 
       const result = maxwidthLayout(testNode, [], context)
 
-      expect(result.contour.left.length).toBeGreaterThan(0)
-      expect(result.contour.right.length).toBeGreaterThan(0)
-      expect(result.contour.left[0]).toBe(-result.root.width / 2)
-      expect(result.contour.right[0]).toBe(result.root.width / 2)
+      expect(result.polygonContour.left.length).toBeGreaterThan(0)
+      expect(result.polygonContour.right.length).toBeGreaterThan(0)
+      // Left boundary should be at -width/2, right at +width/2
+      expect(result.polygonContour.left[0].x).toBe(-result.root.width / 2)
+      expect(result.polygonContour.right[0].x).toBe(result.root.width / 2)
     })
   })
 
@@ -177,7 +178,7 @@ describe('maxwidthLayout', () => {
 
     it('respects vertical gap setting', () => {
       const context = createMockContext({
-        layout: { algorithm: 'maxwidth', horizontalGap: 10, verticalGap: 100, contourRowStep: 4 },
+        layout: { algorithm: 'maxwidth', horizontalGap: 10, verticalGap: 100 },
       })
       const parent = node('Parent')
       const child = node('Child')
@@ -193,7 +194,7 @@ describe('maxwidthLayout', () => {
 
     it('respects horizontal gap setting', () => {
       const context = createMockContext({
-        layout: { algorithm: 'maxwidth', horizontalGap: 50, verticalGap: 40, contourRowStep: 4 },
+        layout: { algorithm: 'maxwidth', horizontalGap: 50, verticalGap: 40 },
       })
       const parent = node('Parent')
       const child1 = node('A')
@@ -377,166 +378,54 @@ describe('topAlignLayout', () => {
   })
 })
 
-describe('contour correctness', () => {
-  describe('contour row positions match node positions', () => {
-    it('single node contour starts at node top', () => {
-      const context = createMockContext()
-      const testNode = node('Test')
+describe('polygon contour correctness', () => {
+  it('single node polygon contour has correct bounds', () => {
+    const context = createMockContext()
+    const testNode = node('Test')
 
-      const result = maxwidthLayout(testNode, [], context)
+    const result = maxwidthLayout(testNode, [], context)
 
-      // Contour row 0 should represent the top of the node
-      // For a node centered at y=0, top is at -height/2
-      // Contour left[0] should be -width/2 (left edge at top row)
-      expect(result.contour.left[0]).toBe(-result.root.width / 2)
-      expect(result.contour.right[0]).toBe(result.root.width / 2)
-    })
+    // Left boundary should start at top-left and go to bottom-left
+    expect(result.polygonContour.left[0].x).toBe(-result.root.width / 2)
+    expect(result.polygonContour.left[0].y).toBe(-result.root.height / 2)
 
-    it('child contour merged at correct vertical position (maxwidth)', () => {
-      const context = createMockContext()
-      const parent = node('Parent')
-      const child = node('Child')
-      const laidOutChildren = layoutChildren([child], context, maxwidthLayout)
-
-      const result = maxwidthLayout(parent, laidOutChildren, context)
-
-      // The contour should have rows covering from parent top to child bottom
-      const parentTop = result.root.y - result.root.height / 2
-      const childTop = result.root.children[0].y - result.root.children[0].height / 2
-      const childBottom = result.root.children[0].y + result.root.children[0].height / 2
-
-      // Total height in contour should cover from parent top to child bottom
-      const expectedHeight = childBottom - parentTop
-      expect(result.contour.height).toBeCloseTo(expectedHeight, 1)
-
-      // The row where child starts should have child's width, not parent's
-      // Note: mergeContours uses Math.round for row alignment
-      const rowStep = context.layout.contourRowStep
-      const childStartRow = Math.round((childTop - parentTop) / rowStep)
-
-      // At child's row, contour should reflect child's bounds
-      if (childStartRow < result.contour.left.length) {
-        const childHalfWidth = result.root.children[0].width / 2
-        // Child is centered at x=0 (since single child is centered under parent)
-        expect(result.contour.left[childStartRow]).toBe(-childHalfWidth)
-        expect(result.contour.right[childStartRow]).toBe(childHalfWidth)
-      }
-    })
-
-    it('child contour merged at correct vertical position (topAlign)', () => {
-      const context = createMockContext()
-      const parent = node('Parent')
-      const child = node('Child')
-      const laidOutChildren = layoutChildren([child], context, topAlignLayout)
-
-      const result = topAlignLayout(parent, laidOutChildren, context)
-
-      // Similar verification for topAlign
-      const parentTop = result.root.y - result.root.height / 2
-      const childTop = result.root.children[0].y - result.root.children[0].height / 2
-      const childBottom = result.root.children[0].y + result.root.children[0].height / 2
-
-      const expectedHeight = childBottom - parentTop
-      expect(result.contour.height).toBeCloseTo(expectedHeight, 1)
-    })
-
-    it('varying height children have contours at correct positions (maxwidth)', () => {
-      const context = createMockContext()
-      const parent = node('P') // Short parent
-      const shortChild = node('S') // Short child
-      const tallChild = node('T\nT\nT') // Tall child (3 lines)
-      const laidOutChildren = layoutChildren([shortChild, tallChild], context, maxwidthLayout)
-
-      const result = maxwidthLayout(parent, laidOutChildren, context)
-
-      // In maxwidth, children are center-aligned
-      // The short child and tall child have the same center y
-      expect(result.root.children[0].y).toBe(result.root.children[1].y)
-
-      // But their tops are different - tall child's top is higher (smaller y)
-      const shortTop = result.root.children[0].y - result.root.children[0].height / 2
-      const tallTop = result.root.children[1].y - result.root.children[1].height / 2
-      expect(tallTop).toBeLessThan(shortTop)
-
-      // The contour at the tall child's top row should include the tall child's bounds
-      // Note: mergeContours uses Math.round for row alignment
-      const parentTop = result.root.y - result.root.height / 2
-      const rowStep = context.layout.contourRowStep
-      const tallTopRow = Math.round((tallTop - parentTop) / rowStep)
-
-      // At tall child's top row, the right contour should extend to tall child's right edge
-      if (tallTopRow >= 0 && tallTopRow < result.contour.right.length) {
-        const tallChildRight = result.root.children[1].x + result.root.children[1].width / 2
-        expect(result.contour.right[tallTopRow]).toBeCloseTo(tallChildRight, 1)
-      }
-    })
-
-    it('varying height children have contours at correct positions (topAlign)', () => {
-      const context = createMockContext()
-      const parent = node('P')
-      const shortChild = node('S')
-      const tallChild = node('T\nT\nT')
-      const laidOutChildren = layoutChildren([shortChild, tallChild], context, topAlignLayout)
-
-      const result = topAlignLayout(parent, laidOutChildren, context)
-
-      // In topAlign, children are top-aligned
-      const shortTop = result.root.children[0].y - result.root.children[0].height / 2
-      const tallTop = result.root.children[1].y - result.root.children[1].height / 2
-      expect(shortTop).toBeCloseTo(tallTop, 1)
-
-      // Both children start at the same row in the contour
-      // Note: mergeContours uses Math.round for row alignment
-      const parentTop = result.root.y - result.root.height / 2
-      const rowStep = context.layout.contourRowStep
-      const childrenTopRow = Math.round((shortTop - parentTop) / rowStep)
-
-      // At children's top row, contour should span both children
-      if (childrenTopRow >= 0 && childrenTopRow < result.contour.left.length) {
-        const leftChildLeft = result.root.children[0].x - result.root.children[0].width / 2
-        const rightChildRight = result.root.children[1].x + result.root.children[1].width / 2
-        expect(result.contour.left[childrenTopRow]).toBeCloseTo(leftChildLeft, 1)
-        expect(result.contour.right[childrenTopRow]).toBeCloseTo(rightChildRight, 1)
-      }
-    })
+    // Right boundary should start at top-right and go to bottom-right
+    expect(result.polygonContour.right[0].x).toBe(result.root.width / 2)
+    expect(result.polygonContour.right[0].y).toBe(-result.root.height / 2)
   })
 
-  describe('nested contours accumulate correctly', () => {
-    it('grandchild contour appears at correct depth', () => {
-      const context = createMockContext()
-      const grandchild = node('GC')
-      const child = node('Child', [grandchild])
-      const parent = node('Parent', [child])
-      const laidOutChildren = layoutChildren([child], context, maxwidthLayout)
+  it('parent with children has polygon contour extending to children', () => {
+    const context = createMockContext()
+    const parent = node('Parent')
+    const child = node('Child')
+    const laidOutChildren = layoutChildren([child], context, maxwidthLayout)
 
-      const result = maxwidthLayout(parent, laidOutChildren, context)
+    const result = maxwidthLayout(parent, laidOutChildren, context)
 
-      const parentTop = result.root.y - result.root.height / 2
-      const gcNode = result.root.children[0].children[0]
-      const gcTop = gcNode.y - gcNode.height / 2
-      const gcBottom = gcNode.y + gcNode.height / 2
+    // The polygon contour should exist and have vertices
+    expect(result.polygonContour.left.length).toBeGreaterThan(0)
+    expect(result.polygonContour.right.length).toBeGreaterThan(0)
 
-      // Contour height should extend to grandchild's bottom
-      expect(result.contour.height).toBeGreaterThanOrEqual(gcBottom - parentTop - 1)
+    // The polygon contour should extend down to the child
+    const childBottom = result.root.children[0].y + result.root.children[0].height / 2
+    const contourBottomY = Math.max(
+      ...result.polygonContour.left.map(p => p.y),
+      ...result.polygonContour.right.map(p => p.y)
+    )
+    expect(contourBottomY).toBeCloseTo(childBottom, 1)
+  })
 
-      // The grandchild's width should appear somewhere in the contour
-      // Due to nested rounding in mergeContours, we search for the row
-      // where grandchild's bounds appear, rather than computing exact row index
-      const gcHalfWidth = gcNode.width / 2
-      const rowStep = context.layout.contourRowStep
-      const expectedRow = Math.round((gcTop - parentTop) / rowStep)
+  it('polygon contour is attached to layout nodes', () => {
+    const context = createMockContext()
+    const tree = node('Root', [node('A'), node('B')])
+    const laidOutChildren = layoutChildren(tree.children!, context, maxwidthLayout)
 
-      // Search within ±2 rows of expected position (accounts for cumulative rounding)
-      let foundGrandchildBounds = false
-      for (let row = Math.max(0, expectedRow - 2); row <= Math.min(result.contour.left.length - 1, expectedRow + 2); row++) {
-        if (Math.abs(result.contour.left[row] - (-gcHalfWidth)) < 1 &&
-            Math.abs(result.contour.right[row] - gcHalfWidth) < 1) {
-          foundGrandchildBounds = true
-          break
-        }
-      }
-      expect(foundGrandchildBounds).toBe(true)
-    })
+    const result = maxwidthLayout(tree, laidOutChildren, context)
+
+    // Root should have polygon contour
+    expect(result.root.polygonContour).toBeDefined()
+    expect(result.root.polygonContour!.left.length).toBeGreaterThan(0)
+    expect(result.root.polygonContour!.right.length).toBeGreaterThan(0)
   })
 })
 

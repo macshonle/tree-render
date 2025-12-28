@@ -1,4 +1,56 @@
-import type { TreeNode, LayoutNode, TreeStyle, TreeExample } from '@/types'
+import type { TreeNode, LayoutNode, TreeStyle, TreeExample, EdgeStyle } from '@/types'
+
+// ============================================================================
+// Edge-Aware Y-Monotone Polygon Contours
+// ============================================================================
+
+/**
+ * A point on a contour path.
+ * Coordinates are integers (pixel resolution).
+ */
+export interface ContourPoint {
+  x: number
+  y: number
+}
+
+/**
+ * A Y-monotone polygon representing a subtree's contour.
+ *
+ * Y-monotone means every horizontal line intersects the boundary at most twice.
+ * This property is guaranteed for tree layouts because:
+ * - Tree structure flows strictly downward (parent above children)
+ * - No subtree can wrap around another from below
+ * - No caves, overhangs, or U-shapes are possible
+ *
+ * The polygon is represented as two boundary paths:
+ * - left: traces the left boundary from top to bottom (y increasing)
+ * - right: traces the right boundary from top to bottom (y increasing)
+ *
+ * The closed polygon path (counterclockwise in screen coords) is:
+ *   left[0] → left[1] → ... → left[n] →
+ *   right[n] → right[n-1] → ... → right[0] → left[0]
+ *
+ * Coordinates are relative to the subtree root's position (root at origin).
+ */
+export interface YMonotonePolygon {
+  /** Left boundary points, ordered top-to-bottom (y increasing) */
+  left: ContourPoint[]
+  /** Right boundary points, ordered top-to-bottom (y increasing) */
+  right: ContourPoint[]
+}
+
+/**
+ * Edge contour style determines how parent-to-child connections affect the contour.
+ *
+ * - 'curve': Corner-to-corner diagonals (simplest - parent bottom corners to child top corners)
+ * - 'straight-arrow': Center-to-center diagonals (parent bottom-center to child top-center)
+ * - 'org-chart': Rectangular segments (vertical drop, horizontal bar, vertical drops to children)
+ */
+export type EdgeContourStyle = EdgeStyle
+
+// ============================================================================
+// Text Measurement
+// ============================================================================
 
 /**
  * Text measurement result
@@ -33,29 +85,6 @@ export interface SubtreeBounds {
 }
 
 /**
- * Skyline contour for a subtree.
- *
- * Represents the left and right edge profiles of a subtree as arrays
- * indexed by row (y / rowStep). This enables tighter packing where
- * subtree bounding boxes can overlap without nodes actually intersecting.
- *
- * Coordinates are relative to the subtree root's position.
- */
-export interface SkylineContour {
-  /** Left edge x-coordinates per row (indexed by row number) */
-  left: number[]
-  /** Right edge x-coordinates per row (indexed by row number) */
-  right: number[]
-  /** Total height of the contour in pixels */
-  height: number
-  /** Row step used when this contour was created (for consistent rendering) */
-  rowStep: number
-}
-
-/** Default row height for contour sampling (pixels). Use layout.contourRowStep for configurable value. */
-export const DEFAULT_CONTOUR_ROW_STEP = 4
-
-/**
  * Result of laying out a subtree.
  * Contains both the positioned nodes and the subtree's boundary information.
  */
@@ -64,8 +93,8 @@ export interface LayoutResult {
   root: LayoutNode
   /** Boundary information for composition with siblings */
   bounds: SubtreeBounds
-  /** Skyline contour for tighter packing algorithms */
-  contour: SkylineContour
+  /** Edge-aware Y-monotone polygon contour */
+  polygonContour: YMonotonePolygon
 }
 
 /**
@@ -91,6 +120,8 @@ export interface LayoutContext {
   layout: TreeStyle['layout']
   /** Node padding from style */
   padding: number
+  /** Edge style (for edge-aware contour building) */
+  edgeStyle: EdgeStyle
 }
 
 /**

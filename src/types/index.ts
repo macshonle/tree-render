@@ -26,8 +26,6 @@ export interface TreeStyle {
     algorithm: LayoutAlgorithmType
     horizontalGap: number
     verticalGap: number
-    /** Row height for contour sampling in pixels (affects layout precision vs performance) */
-    contourRowStep: number
   }
 }
 
@@ -49,8 +47,7 @@ export const defaultTreeStyle: TreeStyle = {
   layout: {
     algorithm: 'maxwidth',
     horizontalGap: 10,
-    verticalGap: 40,
-    contourRowStep: 4
+    verticalGap: 40
   }
 }
 
@@ -64,13 +61,18 @@ export interface TreeNode {
   height?: number
 }
 
-// Skyline contour for subtree edge profiles (re-exported from layout/types)
-export interface SkylineContour {
-  left: number[]
-  right: number[]
-  height: number
-  /** Row step used when this contour was created (for consistent rendering) */
-  rowStep: number
+// Point on a contour path (for edge-aware Y-monotone polygon contours)
+export interface ContourPoint {
+  x: number
+  y: number
+}
+
+// Y-monotone polygon contour for edge-aware subtree boundaries
+export interface YMonotonePolygon {
+  /** Left boundary points, ordered top-to-bottom (y increasing) */
+  left: ContourPoint[]
+  /** Right boundary points, ordered top-to-bottom (y increasing) */
+  right: ContourPoint[]
 }
 
 // Layout node with calculated positions (output of layout algorithms)
@@ -82,8 +84,8 @@ export interface LayoutNode {
   width: number
   height: number
   children: LayoutNode[]
-  /** Skyline contour for this subtree (for debug visualization) */
-  contour?: SkylineContour
+  /** Edge-aware Y-monotone polygon contour for this subtree */
+  polygonContour?: YMonotonePolygon
 }
 
 // Sizing mode for tree examples

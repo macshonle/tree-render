@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { mdiPlus, mdiMinus } from '@mdi/js'
-import type { TreeStyle, TreeExample, LayoutNode, SkylineContour } from '@/types'
+import type { TreeStyle, TreeExample, LayoutNode, YMonotonePolygon, ContourPoint } from '@/types'
 import { layoutTree, createCanvasTextMeasurer } from '@/layout'
 import { useDebugMode } from '@/composables/useDebugMode'
 
@@ -251,7 +251,7 @@ function draw() {
 }
 
 /**
- * Draw debug contours for the selected node or edge
+ * Draw debug contours for the selected node or edge.
  */
 function drawDebugContours(
   ctx: CanvasRenderingContext2D,
@@ -262,10 +262,9 @@ function drawDebugContours(
   if (sel.type === 'node') {
     // Find the node and draw its contour
     const node = findNodeById(root, sel.nodeId)
-    if (node?.contour) {
-      // Pass the node's height so we know where the contour starts
-      drawContourPaths(ctx, node.contour, node.x + offsetX, node.y, node.height, 'left', 'rgba(0, 180, 0, 0.9)')
-      drawContourPaths(ctx, node.contour, node.x + offsetX, node.y, node.height, 'right', 'rgba(220, 0, 0, 0.9)')
+    if (node?.polygonContour) {
+      drawPolygonContour(ctx, node.polygonContour, node.x + offsetX, node.y, 'left', 'rgba(0, 180, 0, 0.9)')
+      drawPolygonContour(ctx, node.polygonContour, node.x + offsetX, node.y, 'right', 'rgba(220, 0, 0, 0.9)')
     }
   } else {
     // Find the parent node
@@ -280,21 +279,25 @@ function drawDebugContours(
     // - Left contour of right subtree (if exists, or ancestor's right sibling)
 
     // Left boundary (red): immediate left sibling, or walk up to find ancestor with left sibling
-    if (childIndex > 0 && children[childIndex - 1]?.contour) {
+    if (childIndex > 0) {
       const leftChild = children[childIndex - 1]
-      drawContourPaths(ctx, leftChild.contour!, leftChild.x + offsetX, leftChild.y, leftChild.height, 'right', 'rgba(220, 0, 0, 0.9)')
+      if (leftChild?.polygonContour) {
+        drawPolygonContour(ctx, leftChild.polygonContour, leftChild.x + offsetX, leftChild.y, 'right', 'rgba(220, 0, 0, 0.9)')
+      }
     } else if (childIndex === 0) {
       // No immediate left sibling - find ancestor's left sibling
       const ancestorLeftSibling = findAncestorLeftSibling(root, sel.parentId)
-      if (ancestorLeftSibling?.contour) {
-        drawContourPaths(ctx, ancestorLeftSibling.contour, ancestorLeftSibling.x + offsetX, ancestorLeftSibling.y, ancestorLeftSibling.height, 'right', 'rgba(220, 0, 0, 0.9)')
+      if (ancestorLeftSibling?.polygonContour) {
+        drawPolygonContour(ctx, ancestorLeftSibling.polygonContour, ancestorLeftSibling.x + offsetX, ancestorLeftSibling.y, 'right', 'rgba(220, 0, 0, 0.9)')
       }
     }
 
     // Right boundary (green): the selected child's left contour
-    if (childIndex < children.length && children[childIndex]?.contour) {
+    if (childIndex < children.length) {
       const rightChild = children[childIndex]
-      drawContourPaths(ctx, rightChild.contour!, rightChild.x + offsetX, rightChild.y, rightChild.height, 'left', 'rgba(0, 180, 0, 0.9)')
+      if (rightChild?.polygonContour) {
+        drawPolygonContour(ctx, rightChild.polygonContour, rightChild.x + offsetX, rightChild.y, 'left', 'rgba(0, 180, 0, 0.9)')
+      }
     }
   }
 }
@@ -346,48 +349,20 @@ function findPathToNode(node: LayoutNode, targetId: string, path: LayoutNode[] =
 }
 
 /**
- * Draw the left or right contour as a solid path with dots at inflection points
+ * Draw a Y-monotone polygon contour as left and right boundary paths.
+ * This is the new edge-aware contour format.
  */
-function drawContourPaths(
+function drawPolygonContour(
   ctx: CanvasRenderingContext2D,
-  contour: SkylineContour,
+  contour: YMonotonePolygon,
   nodeX: number,
   nodeY: number,
-  nodeHeight: number,
   side: 'left' | 'right',
   color: string
 ) {
-  const xValues = side === 'left' ? contour.left : contour.right
-  if (xValues.length === 0) return
-
-  // Use the rowStep that was stored with the contour during layout
-  // This ensures consistent rendering regardless of current UI setting
-  const rowStep = contour.rowStep
-
-  // The contour starts at the top of the root node (nodeY - nodeHeight/2)
-  // Row 0 corresponds to that y position
-  const startY = nodeY - nodeHeight / 2
-
-  // Collect valid points and identify inflection points
-  const points: { x: number; y: number; isInflection: boolean }[] = []
-  let prevX: number | null = null
-
-  for (let i = 0; i < xValues.length; i++) {
-    const x = xValues[i]
-    if (!isFinite(x)) continue
-
-    const y = startY + i * rowStep
-    const actualX = nodeX + x
-
-    // Check if this is an inflection point (x changed from previous)
-    const isInflection = prevX !== null && Math.abs(actualX - prevX) > 0.5
-    points.push({ x: actualX, y, isInflection })
-    prevX = actualX
-  }
-
+  const points: ContourPoint[] = side === 'left' ? contour.left : contour.right
   if (points.length === 0) return
 
-  // Draw the solid line (skyline style - horizontal then vertical)
   ctx.save()
   ctx.strokeStyle = color
   ctx.lineWidth = 2
@@ -395,45 +370,26 @@ function drawContourPaths(
   ctx.lineJoin = 'round'
   ctx.beginPath()
 
-  ctx.moveTo(points[0].x, points[0].y)
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1]
-    const curr = points[i]
+  // Draw the path - points are already in node-local coordinates
+  const firstPoint = points[0]
+  ctx.moveTo(nodeX + firstPoint.x, nodeY + firstPoint.y)
 
-    if (curr.isInflection) {
-      // Draw skyline style: horizontal first, then vertical
-      ctx.lineTo(prev.x, curr.y)
-      ctx.lineTo(curr.x, curr.y)
-    } else {
-      ctx.lineTo(curr.x, curr.y)
-    }
+  for (let i = 1; i < points.length; i++) {
+    const point = points[i]
+    ctx.lineTo(nodeX + point.x, nodeY + point.y)
   }
 
   ctx.stroke()
 
-  // Draw dots at inflection points and endpoints
+  // Draw dots at all vertices
   ctx.fillStyle = color
   const dotRadius = 4
 
-  // Start point
-  ctx.beginPath()
-  ctx.arc(points[0].x, points[0].y, dotRadius, 0, Math.PI * 2)
-  ctx.fill()
-
-  // Inflection points
   for (const point of points) {
-    if (point.isInflection) {
-      ctx.beginPath()
-      ctx.arc(point.x, point.y, dotRadius, 0, Math.PI * 2)
-      ctx.fill()
-    }
+    ctx.beginPath()
+    ctx.arc(nodeX + point.x, nodeY + point.y, dotRadius, 0, Math.PI * 2)
+    ctx.fill()
   }
-
-  // End point
-  const lastPoint = points[points.length - 1]
-  ctx.beginPath()
-  ctx.arc(lastPoint.x, lastPoint.y, dotRadius, 0, Math.PI * 2)
-  ctx.fill()
 
   ctx.restore()
 }

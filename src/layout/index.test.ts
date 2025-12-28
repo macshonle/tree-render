@@ -40,7 +40,6 @@ function createTestStyle(overrides: Partial<TreeStyle['layout']> = {}): TreeStyl
       algorithm: 'maxwidth',
       horizontalGap: 10,
       verticalGap: 40,
-      contourRowStep: 4,
       ...overrides,
     },
   }
@@ -202,16 +201,16 @@ describe('layoutTree integration', () => {
     expect(result.children[0].height).toBe(40)
   })
 
-  it('includes contour in result', () => {
+  it('includes polygon contour in result', () => {
     const root = node('Root', [node('Child')])
     const style = createTestStyle()
     const treeData = createTestTreeData(root)
 
     const result = layoutTree(root, treeData, style, measurer)
 
-    expect(result.contour).toBeDefined()
-    expect(result.contour!.left.length).toBeGreaterThan(0)
-    expect(result.contour!.right.length).toBeGreaterThan(0)
+    expect(result.polygonContour).toBeDefined()
+    expect(result.polygonContour!.left.length).toBeGreaterThan(0)
+    expect(result.polygonContour!.right.length).toBeGreaterThan(0)
   })
 
   it('respects horizontalGap setting', () => {
