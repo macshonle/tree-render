@@ -153,9 +153,15 @@ export function buildSubtreeContour(
   const leftChild = sortedChildren[0]
   const rightChild = sortedChildren[sortedChildren.length - 1]
 
-  // Translate the boundary children's contours (for preserving inflection points)
-  const leftChildContour = translateContour(leftChild.contour, leftChild.offsetX, leftChild.offsetY)
-  const rightChildContour = translateContour(rightChild.contour, rightChild.offsetX, rightChild.offsetY)
+  // Translate ALL children's contours to parent's coordinate system
+  const translatedContours = sortedChildren.map((child) =>
+    translateContour(child.contour, child.offsetX, child.offsetY)
+  )
+
+  // Compute the union of all children's contours
+  // This is crucial: a non-rightmost child might have deep descendants
+  // that extend below the rightmost child, and we need to include them
+  const childrenUnion = unionContours(translatedContours)
 
   // Build the contour based on edge style
   switch (edgeStyle) {
@@ -166,8 +172,7 @@ export function buildSubtreeContour(
         parentBottom,
         leftChild,
         rightChild,
-        leftChildContour,
-        rightChildContour
+        childrenUnion
       )
 
     case 'straight-arrow':
@@ -177,8 +182,7 @@ export function buildSubtreeContour(
         parentBottom,
         leftChild,
         rightChild,
-        leftChildContour,
-        rightChildContour
+        childrenUnion
       )
 
     case 'org-chart':
@@ -188,9 +192,8 @@ export function buildSubtreeContour(
         parentBottom,
         leftChild,
         rightChild,
-        leftChildContour,
-        rightChildContour,
-        sortedChildren
+        sortedChildren,
+        childrenUnion
       )
   }
 }
@@ -207,15 +210,14 @@ function buildCurveEdgeContour(
   parentBottom: number,
   leftChild: ChildContourInfo,
   rightChild: ChildContourInfo,
-  leftChildContour: YMonotonePolygon,
-  rightChildContour: YMonotonePolygon
+  childrenUnion: YMonotonePolygon
 ): YMonotonePolygon {
   const leftChildTop = leftChild.offsetY - leftChild.height / 2
   const leftChildLeft = leftChild.offsetX - leftChild.width / 2
   const rightChildTop = rightChild.offsetY - rightChild.height / 2
   const rightChildRight = rightChild.offsetX + rightChild.width / 2
 
-  // Left boundary: parent top-left → parent bottom-left → child top-left (diagonal) → child's contour
+  // Left boundary: parent top-left → parent bottom-left → child top-left (diagonal) → union's left boundary
   const left: ContourPoint[] = [
     { x: -parentHalfW, y: -parentHalfH }, // Parent top-left
     { x: -parentHalfW, y: parentBottom }, // Parent bottom-left
@@ -227,14 +229,15 @@ function buildCurveEdgeContour(
     left.push({ x: leftChildLeft, y: leftChildTop })
   }
 
-  // Add rest of leftmost child's left boundary (skip points above the connection)
-  for (const p of leftChildContour.left) {
+  // Add rest of the UNION's left boundary (skip points above the connection)
+  // Include all points to retain full detail for layout calculations
+  for (const p of childrenUnion.left) {
     if (p.y > leftChildTop + 0.5) {
       left.push(p)
     }
   }
 
-  // Right boundary: parent top-right → parent bottom-right → child top-right (diagonal) → child's contour
+  // Right boundary: parent top-right → parent bottom-right → child top-right (diagonal) → union's right boundary
   const right: ContourPoint[] = [
     { x: parentHalfW, y: -parentHalfH }, // Parent top-right
     { x: parentHalfW, y: parentBottom }, // Parent bottom-right
@@ -245,8 +248,9 @@ function buildCurveEdgeContour(
     right.push({ x: rightChildRight, y: rightChildTop })
   }
 
-  // Add rest of rightmost child's right boundary (skip points above the connection)
-  for (const p of rightChildContour.right) {
+  // Add rest of the UNION's right boundary (skip points above the connection)
+  // Include all points to retain full detail for layout calculations
+  for (const p of childrenUnion.right) {
     if (p.y > rightChildTop + 0.5) {
       right.push(p)
     }
@@ -267,8 +271,7 @@ function buildArrowEdgeContour(
   parentBottom: number,
   leftChild: ChildContourInfo,
   rightChild: ChildContourInfo,
-  leftChildContour: YMonotonePolygon,
-  rightChildContour: YMonotonePolygon
+  childrenUnion: YMonotonePolygon
 ): YMonotonePolygon {
   const leftChildTop = leftChild.offsetY - leftChild.height / 2
   const leftChildLeft = leftChild.offsetX - leftChild.width / 2
@@ -280,7 +283,8 @@ function buildArrowEdgeContour(
 
   // Left boundary:
   // parent top-left → parent bottom-left → parent bottom-center →
-  // leftmost child top-center (diagonal) → child top-left → child's contour
+  // leftmost child top-center (diagonal) → child top-left →
+  // down to child bottom-left → union's left boundary (below child)
   const left: ContourPoint[] = [
     { x: -parentHalfW, y: -parentHalfH }, // Parent top-left
     { x: -parentHalfW, y: parentBottom }, // Parent bottom-left
@@ -294,8 +298,9 @@ function buildArrowEdgeContour(
     left.push({ x: leftChildLeft, y: leftChildTop })
   }
 
-  // Add rest of leftmost child's left boundary (skip points above the connection)
-  for (const p of leftChildContour.left) {
+  // Add union's left boundary points BELOW the child's top
+  // Include all points to retain full detail for layout calculations
+  for (const p of childrenUnion.left) {
     if (p.y > leftChildTop + 0.5) {
       left.push(p)
     }
@@ -303,7 +308,8 @@ function buildArrowEdgeContour(
 
   // Right boundary:
   // parent top-right → parent bottom-right → parent bottom-center →
-  // rightmost child top-center (diagonal) → child top-right → child's contour
+  // rightmost child top-center (diagonal) → child top-right →
+  // union's right boundary (below child top)
   const right: ContourPoint[] = [
     { x: parentHalfW, y: -parentHalfH }, // Parent top-right
     { x: parentHalfW, y: parentBottom }, // Parent bottom-right
@@ -317,8 +323,9 @@ function buildArrowEdgeContour(
     right.push({ x: rightChildRight, y: rightChildTop })
   }
 
-  // Add rest of rightmost child's right boundary (skip points above the connection)
-  for (const p of rightChildContour.right) {
+  // Add union's right boundary points BELOW the child's top
+  // Include all points to retain full detail for layout calculations
+  for (const p of childrenUnion.right) {
     if (p.y > rightChildTop + 0.5) {
       right.push(p)
     }
@@ -341,9 +348,8 @@ function buildOrgChartEdgeContour(
   parentBottom: number,
   leftChild: ChildContourInfo,
   rightChild: ChildContourInfo,
-  leftChildContour: YMonotonePolygon,
-  rightChildContour: YMonotonePolygon,
-  sortedChildren: ChildContourInfo[]
+  sortedChildren: ChildContourInfo[],
+  childrenUnion: YMonotonePolygon
 ): YMonotonePolygon {
   // Find the topmost child to determine bar position
   const topmostChildTop = Math.min(
@@ -364,7 +370,8 @@ function buildOrgChartEdgeContour(
   // Left boundary:
   // parent top-left → parent bottom-left → parent bottom-center →
   // down to bar → horizontal to leftmost child center →
-  // down to child top → horizontal to child top-left → child's contour
+  // down to child top → horizontal to child top-left →
+  // union's left boundary (below child top)
   const left: ContourPoint[] = [
     { x: -parentHalfW, y: -parentHalfH }, // Parent top-left
     { x: -parentHalfW, y: parentBottom }, // Parent bottom-left
@@ -375,8 +382,9 @@ function buildOrgChartEdgeContour(
     { x: leftChildLeft, y: leftChildTop }, // Horizontal to child top-left
   ]
 
-  // Add rest of leftmost child's left boundary (skip points above the connection)
-  for (const p of leftChildContour.left) {
+  // Add union's left boundary points BELOW the child's top
+  // Include all points to retain full detail for layout calculations
+  for (const p of childrenUnion.left) {
     if (p.y > leftChildTop + 0.5) {
       left.push(p)
     }
@@ -385,7 +393,8 @@ function buildOrgChartEdgeContour(
   // Right boundary:
   // parent top-right → parent bottom-right → parent bottom-center →
   // down to bar → horizontal to rightmost child center →
-  // down to child top → horizontal to child top-right → child's contour
+  // down to child top → horizontal to child top-right →
+  // union's right boundary (below child top)
   const right: ContourPoint[] = [
     { x: parentHalfW, y: -parentHalfH }, // Parent top-right
     { x: parentHalfW, y: parentBottom }, // Parent bottom-right
@@ -396,8 +405,9 @@ function buildOrgChartEdgeContour(
     { x: rightChildRight, y: rightChildTop }, // Horizontal to child top-right
   ]
 
-  // Add rest of rightmost child's right boundary (skip points above the connection)
-  for (const p of rightChildContour.right) {
+  // Add union's right boundary points BELOW the child's top
+  // Include all points to retain full detail for layout calculations
+  for (const p of childrenUnion.right) {
     if (p.y > rightChildTop + 0.5) {
       right.push(p)
     }
@@ -414,11 +424,18 @@ function buildOrgChartEdgeContour(
  * Compute the union of multiple Y-monotone polygon contours.
  *
  * This is used when combining sibling subtrees - the result is the outer
- * envelope that encompasses all input contours.
+ * envelope that encompasses all input contours, while PRESERVING detail
+ * from the dominant contour at each y-segment.
  *
  * For Y-monotone polygons, union is computed by:
- * - Left boundary: take minimum x at each y level
- * - Right boundary: take maximum x at each y level
+ * - Left boundary: track which contour is leftmost at each y-segment,
+ *   preserve all detail from the dominant contour
+ * - Right boundary: track which contour is rightmost at each y-segment,
+ *   preserve all detail from the dominant contour
+ *
+ * This differs from a simple envelope computation because it preserves
+ * inflection points (like edge geometry dips) from the dominant contour,
+ * which are needed for accurate debug visualization.
  *
  * @param contours Array of contours (already positioned in parent's coordinate system)
  * @returns Union contour encompassing all inputs
@@ -432,48 +449,177 @@ export function unionContours(contours: YMonotonePolygon[]): YMonotonePolygon {
     return cloneContour(contours[0])
   }
 
-  // Collect all y-coordinates where any contour has a vertex
-  const yBreakpoints = new Set<number>()
-  for (const contour of contours) {
-    for (const p of contour.left) yBreakpoints.add(p.y)
-    for (const p of contour.right) yBreakpoints.add(p.y)
-  }
-
-  const sortedYs = Array.from(yBreakpoints).sort((a, b) => a - b)
-
-  // At each y, compute the envelope (min left, max right)
-  const leftPoints: ContourPoint[] = []
-  const rightPoints: ContourPoint[] = []
-
-  for (const y of sortedYs) {
-    let minX = Infinity
-    let maxX = -Infinity
-
-    for (const contour of contours) {
-      const leftX = interpolateLeftBoundaryX(contour.left, y)
-      const rightX = interpolateRightBoundaryX(contour.right, y)
-
-      if (leftX !== null) minX = Math.min(minX, leftX)
-      if (rightX !== null) maxX = Math.max(maxX, rightX)
-    }
-
-    if (isFinite(minX)) {
-      // Avoid duplicate points
-      const lastLeft = leftPoints[leftPoints.length - 1]
-      if (!lastLeft || lastLeft.x !== minX || lastLeft.y !== y) {
-        leftPoints.push({ x: minX, y })
-      }
-    }
-
-    if (isFinite(maxX)) {
-      const lastRight = rightPoints[rightPoints.length - 1]
-      if (!lastRight || lastRight.x !== maxX || lastRight.y !== y) {
-        rightPoints.push({ x: maxX, y })
-      }
-    }
-  }
+  // Compute detail-preserving boundaries
+  const leftPoints = computeDetailPreservingBoundary(contours, 'left')
+  const rightPoints = computeDetailPreservingBoundary(contours, 'right')
 
   return { left: leftPoints, right: rightPoints }
+}
+
+/**
+ * Compute a detail-preserving boundary for the union of multiple contours.
+ *
+ * Instead of just computing the envelope (min/max x at each y), this function:
+ * 1. Identifies which contour is "dominant" (leftmost for left boundary,
+ *    rightmost for right boundary) at each y-segment
+ * 2. Preserves ALL points from the dominant contour in that segment,
+ *    maintaining their original order to preserve the boundary path
+ * 3. Adds interpolated transition points when dominance changes
+ *
+ * @param contours The contours to union
+ * @param side Which boundary to compute ('left' or 'right')
+ * @returns Array of points forming the detail-preserving boundary
+ */
+function computeDetailPreservingBoundary(
+  contours: YMonotonePolygon[],
+  side: 'left' | 'right'
+): ContourPoint[] {
+  if (contours.length === 0) return []
+
+  const interpolateFn =
+    side === 'left' ? interpolateLeftBoundaryX : interpolateRightBoundaryX
+  const isMoreDominant =
+    side === 'left'
+      ? (a: number, b: number) => a < b
+      : (a: number, b: number) => a > b
+
+  // Find the overall y-range
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const contour of contours) {
+    const boundary = side === 'left' ? contour.left : contour.right
+    for (const p of boundary) {
+      minY = Math.min(minY, p.y)
+      maxY = Math.max(maxY, p.y)
+    }
+  }
+  if (!isFinite(minY)) return []
+
+  // Build a list of y-segments where each contour's dominance may change
+  // Collect all unique y values where contour boundaries have vertices
+  const yBreakpoints = new Set<number>()
+  for (const contour of contours) {
+    const boundary = side === 'left' ? contour.left : contour.right
+    for (const p of boundary) {
+      yBreakpoints.add(p.y)
+    }
+  }
+  const sortedYs = Array.from(yBreakpoints).sort((a, b) => a - b)
+
+  // For each y-segment, determine which contour is dominant
+  // A segment is [sortedYs[i], sortedYs[i+1]]
+  const segmentDominant: number[] = [] // Index of dominant contour for each segment
+
+  for (let i = 0; i < sortedYs.length - 1; i++) {
+    const midY = (sortedYs[i] + sortedYs[i + 1]) / 2
+    let dominantIdx = -1
+    let dominantX = side === 'left' ? Infinity : -Infinity
+
+    for (let j = 0; j < contours.length; j++) {
+      const boundary = side === 'left' ? contours[j].left : contours[j].right
+      const x = interpolateFn(boundary, midY)
+      if (x !== null && isMoreDominant(x, dominantX)) {
+        dominantX = x
+        dominantIdx = j
+      }
+    }
+    segmentDominant.push(dominantIdx)
+  }
+
+  // Now build the result by traversing the dominant contour for each segment
+  const result: ContourPoint[] = []
+  let currentDominantIdx = -1
+
+  for (let segIdx = 0; segIdx < segmentDominant.length; segIdx++) {
+    const segStartY = sortedYs[segIdx]
+    const segEndY = sortedYs[segIdx + 1]
+    const dominantIdx = segmentDominant[segIdx]
+
+    if (dominantIdx === -1) continue
+
+    const dominantBoundary =
+      side === 'left' ? contours[dominantIdx].left : contours[dominantIdx].right
+
+    // Check if dominant contour has explicit points at segStartY
+    const explicitPointsAtStart = dominantBoundary.filter((p) => p.y === segStartY)
+    const hasExplicitAtStart = explicitPointsAtStart.length > 0
+
+    // Handle transition to a new dominant contour
+    if (dominantIdx !== currentDominantIdx) {
+      // Add transition point at segment start from OLD dominant (to close its path)
+      if (currentDominantIdx !== -1) {
+        const oldBoundary =
+          side === 'left'
+            ? contours[currentDominantIdx].left
+            : contours[currentDominantIdx].right
+        const oldX = interpolateFn(oldBoundary, segStartY)
+        if (oldX !== null) {
+          addPointIfNew(result, { x: oldX, y: segStartY })
+        }
+      }
+
+      // Add transition point at segment start from NEW dominant
+      // Only add interpolated point if there are no explicit points at this y
+      if (!hasExplicitAtStart) {
+        const startX = interpolateFn(dominantBoundary, segStartY)
+        if (startX !== null) {
+          addPointIfNew(result, { x: startX, y: segStartY })
+        }
+      }
+      currentDominantIdx = dominantIdx
+    } else {
+      // Same dominant contour - add interpolated point only if no explicit points at this y
+      // to ensure continuity when there are no explicit points in this segment
+      if (!hasExplicitAtStart) {
+        const startX = interpolateFn(dominantBoundary, segStartY)
+        if (startX !== null) {
+          addPointIfNew(result, { x: startX, y: segStartY })
+        }
+      }
+    }
+
+    // Add all points from the dominant contour in this segment (including segStartY)
+    // maintaining the original order to preserve the boundary path
+    for (const p of dominantBoundary) {
+      if (p.y >= segStartY && p.y < segEndY) {
+        addPointIfNew(result, { x: p.x, y: p.y })
+      }
+    }
+  }
+
+  // Handle the last y-breakpoint
+  if (sortedYs.length > 0 && currentDominantIdx !== -1) {
+    const lastY = sortedYs[sortedYs.length - 1]
+    const dominantBoundary =
+      side === 'left'
+        ? contours[currentDominantIdx].left
+        : contours[currentDominantIdx].right
+
+    // Add interpolated point at the last y
+    const lastX = interpolateFn(dominantBoundary, lastY)
+    if (lastX !== null) {
+      addPointIfNew(result, { x: lastX, y: lastY })
+    }
+
+    // Also add any explicit points at exactly the last y
+    for (const p of dominantBoundary) {
+      if (p.y === lastY) {
+        addPointIfNew(result, { x: p.x, y: p.y })
+      }
+    }
+  }
+
+  return result
+}
+
+/**
+ * Add a point to the result array if it's not a duplicate of the last point.
+ */
+function addPointIfNew(result: ContourPoint[], point: ContourPoint): void {
+  const last = result[result.length - 1]
+  if (!last || last.x !== point.x || last.y !== point.y) {
+    result.push(point)
+  }
 }
 
 /**
