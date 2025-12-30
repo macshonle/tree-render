@@ -5,7 +5,7 @@ export type NodeShape = 'rectangle' | 'rounded-rectangle' | 'circle' | 'ellipse'
 export type EdgeStyle = 'curve' | 'straight-arrow' | 'org-chart'
 
 // Layout algorithm types
-export type LayoutAlgorithmType = 'maxwidth' | 'top-align' | 'lr-squeeze' | 'rl-squeeze'
+export type LayoutAlgorithmType = 'maxwidth' | 'top-align' | 'lr-squeeze' | 'rl-squeeze' | 'tidy'
 
 // Style configuration for the tree
 export interface TreeStyle {

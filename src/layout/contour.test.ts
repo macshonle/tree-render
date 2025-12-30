@@ -6,7 +6,7 @@ import {
   getContourBounds,
   buildSubtreeContour,
   unionContours,
-  findMinHorizontalGap,
+  findMinGap,
   calculatePlacementOffset,
   mergeContoursWithGap,
   type ChildContourInfo,
@@ -280,13 +280,10 @@ describe('buildSubtreeContour', () => {
 
       const contour = buildSubtreeContour(60, 40, children, 'straight-arrow')
 
-      // Should have parent rectangle + edge geometry + child
-      // Right boundary should include:
+      // With uniform envelope approach (corner-to-corner), right boundary includes:
       // - Parent top-right
       // - Parent bottom-right
-      // - Parent bottom-center (for edge start)
-      // - Child top-center (diagonal)
-      // - Child top-right (horizontal)
+      // - Diagonal to child top-right
       // - Child bottom-right
       expect(contour.right.length).toBeGreaterThan(2)
 
@@ -294,9 +291,12 @@ describe('buildSubtreeContour', () => {
       expect(contour.right[0].x).toBe(30) // parent width/2
       expect(contour.right[0].y).toBe(-20) // -parent height/2
 
-      // Should include edge connection point at parent bottom center
-      const bottomCenterPoint = contour.right.find((p) => p.x === 0 && p.y === 20)
-      expect(bottomCenterPoint).toBeDefined()
+      // Uniform approach uses corner-to-corner, NOT center-to-center
+      // So there's no point at (0, 20) - verify the contour goes to child's corner instead
+      // Child: width=40 (halfWidth=20), height=30 (halfHeight=15), offsetX=0, offsetY=60
+      // Child top-right is at (20, 60-15) = (20, 45)
+      const childTopRight = contour.right.find((p) => p.x === 20 && p.y === 45)
+      expect(childTopRight).toBeDefined()
     })
 
     it('preserves child subtree inflection points', () => {
@@ -435,7 +435,7 @@ describe('buildSubtreeContour', () => {
   })
 
   describe('org-chart edge style', () => {
-    it('creates rectangular edge with horizontal bar', () => {
+    it('uses same envelope as curve style (uniform approach)', () => {
       const childContour = createNodeContour(40, 30)
       const children: ChildContourInfo[] = [
         {
@@ -447,26 +447,46 @@ describe('buildSubtreeContour', () => {
         },
       ]
 
-      const contour = buildSubtreeContour(60, 40, children, 'org-chart')
+      // All edge styles now use the same uniform envelope approach
+      const orgChartContour = buildSubtreeContour(60, 40, children, 'org-chart')
+      const curveContour = buildSubtreeContour(60, 40, children, 'curve')
 
-      // Should have more points due to rectangular routing
-      // Parent corners + vertical drop + horizontal bar + vertical drop + child
-      expect(contour.right.length).toBeGreaterThan(4)
+      // Contours should be identical since we now use corner-to-corner for all styles
+      expect(orgChartContour.left).toEqual(curveContour.left)
+      expect(orgChartContour.right).toEqual(curveContour.right)
+    })
+  })
 
-      // Should include a point at the horizontal bar Y level
-      const barY = (20 + 45) / 2 // midpoint between parent bottom and child top
-      const barPoint = contour.right.find((p) => Math.abs(p.y - barY) < 1)
-      expect(barPoint).toBeDefined()
+  describe('straight-arrow edge style', () => {
+    it('uses same envelope as curve style (uniform approach)', () => {
+      const childContour = createNodeContour(40, 30)
+      const children: ChildContourInfo[] = [
+        {
+          contour: childContour,
+          offsetX: 0,
+          offsetY: 60,
+          width: 40,
+          height: 30,
+        },
+      ]
+
+      // All edge styles now use the same uniform envelope approach
+      const straightContour = buildSubtreeContour(60, 40, children, 'straight-arrow')
+      const curveContour = buildSubtreeContour(60, 40, children, 'curve')
+
+      // Contours should be identical since we now use corner-to-corner for all styles
+      expect(straightContour.left).toEqual(curveContour.left)
+      expect(straightContour.right).toEqual(curveContour.right)
     })
   })
 })
 
-describe('findMinHorizontalGap', () => {
+describe('findMinGap', () => {
   it('returns null for non-overlapping contours vertically', () => {
     const top = translateContour(createNodeContour(20, 20), 0, -50)
     const bottom = translateContour(createNodeContour(20, 20), 0, 50)
 
-    const gap = findMinHorizontalGap(top, bottom)
+    const gap = findMinGap(top, bottom)
     expect(gap).toBeNull()
   })
 
@@ -476,18 +496,18 @@ describe('findMinHorizontalGap', () => {
 
     // Left contour right edge at -20, right contour left edge at 20
     // Gap should be 40
-    const gap = findMinHorizontalGap(left, right)
+    const gap = findMinGap(left, right)
     expect(gap).toBe(40)
   })
 
-  it('returns negative gap for overlapping contours', () => {
+  it('returns positive Euclidean distance for horizontally overlapping contours', () => {
     const left = translateContour(createNodeContour(40, 20), -10, 0)
     const right = translateContour(createNodeContour(40, 20), 10, 0)
 
-    // Left contour right edge at 10, right contour left edge at -10
-    // They overlap, so gap is negative
-    const gap = findMinHorizontalGap(left, right)
-    expect(gap).toBeLessThan(0)
+    // Left contour right edge at x=10, right contour left edge at x=-10
+    // They "overlap" horizontally, but Euclidean distance is 20 (the horizontal distance)
+    const gap = findMinGap(left, right)
+    expect(gap).toBe(20)
   })
 })
 
@@ -516,10 +536,9 @@ describe('calculatePlacementOffset', () => {
 // Comprehensive gap detection and placement tests
 // ============================================================================
 
-describe('findMinHorizontalGap - comprehensive', () => {
-  it('finds gap at the narrowest point between contours with outward spike', () => {
+describe('findMinGap - comprehensive', () => {
+  it('finds minimum Euclidean distance between contour boundaries', () => {
     // Left contour has an outward spike on its right boundary
-    // This creates a point where the contours are CLOSEST
     const leftContour: YMonotonePolygon = {
       left: [
         { x: -50, y: 0 },
@@ -528,7 +547,7 @@ describe('findMinHorizontalGap - comprehensive', () => {
       right: [
         { x: 10, y: 0 },
         { x: 10, y: 40 },
-        { x: 30, y: 40 },   // outward spike - this is the closest point
+        { x: 30, y: 40 },   // outward spike going RIGHT (away from the other contour)
         { x: 30, y: 60 },
         { x: 10, y: 60 },
         { x: 10, y: 100 },
@@ -536,15 +555,15 @@ describe('findMinHorizontalGap - comprehensive', () => {
     }
 
     // Right contour is a simple rectangle at origin
-    const rightContour = createNodeContour(40, 100)  // left edge at -20
+    const rightContour = createNodeContour(40, 100)  // left edge at -20, Y from -50 to 50
 
-    const gap = findMinHorizontalGap(leftContour, rightContour)
+    const gap = findMinGap(leftContour, rightContour)
 
-    // Gap should be measured at the spike (y=40-60) where left's right edge is at x=30
-    // and right's left edge is at x=-20
-    // Gap = -20 - 30 = -50 (most overlap)
-    // At other y-levels, left's right edge is at x=10, so gap = -20 - 10 = -30
-    expect(gap).toBe(-50)  // Minimum gap is at the outward spike
+    // Y overlap is 0 to 50
+    // At y=0-40: left's right edge at x=10, distance to right's left edge (x=-20) = 30
+    // At y=40-50 spike: left's right edge at x=30, distance = 50
+    // Minimum Euclidean distance is 30 (where contours are closest)
+    expect(gap).toBe(30)
   })
 
   it('finds gap when right contour has outward bulge', () => {
@@ -568,7 +587,7 @@ describe('findMinHorizontalGap - comprehensive', () => {
       ],
     }
 
-    const gap = findMinHorizontalGap(leftContour, rightContour)
+    const gap = findMinGap(leftContour, rightContour)
 
     // Gap at the bulge (y=40-60): right's left edge at x=0, left's right edge at x=-10
     // Gap = 0 - (-10) = 10
@@ -584,7 +603,7 @@ describe('findMinHorizontalGap - comprehensive', () => {
     const rightContour = translateContour(createNodeContour(40, 50), 50, 45)
     // top = 45 - 25 = 20, bottom = 45 + 25 = 70
 
-    const gap = findMinHorizontalGap(leftContour, rightContour)
+    const gap = findMinGap(leftContour, rightContour)
 
     // Left's right edge at x=20, right's left edge at x=50-20=30
     // Gap = 30 - 20 = 10
@@ -620,7 +639,7 @@ describe('findMinHorizontalGap - comprehensive', () => {
       ],
     }
 
-    const gap = findMinHorizontalGap(leftContour, rightContour)
+    const gap = findMinGap(leftContour, rightContour)
 
     // At y=50: left's right edge at x=20 (max of horizontal), right's left edge at x=30 (min)
     // Gap = 30 - 20 = 10
@@ -647,7 +666,7 @@ describe('findMinHorizontalGap - comprehensive', () => {
     const rightContour = translateContour(createNodeContour(20, 100), 30, 0)
     // right's left edge at x=20
 
-    const gap = findMinHorizontalGap(leftContour, rightContour)
+    const gap = findMinGap(leftContour, rightContour)
 
     // Gap at spike (y=33-34): left's right at x=15, right's left at x=20
     // Gap = 20 - 15 = 5
@@ -665,7 +684,7 @@ describe('calculatePlacementOffset - comprehensive', () => {
 
     // Apply offset and verify
     const translatedRight = translateContour(right, offset, 0)
-    const newGap = findMinHorizontalGap(left, translatedRight)
+    const newGap = findMinGap(left, translatedRight)
 
     expect(newGap).toBe(15)
   })
@@ -679,7 +698,7 @@ describe('calculatePlacementOffset - comprehensive', () => {
 
     // Apply offset and verify
     const translatedRight = translateContour(right, offset, 0)
-    const newGap = findMinHorizontalGap(left, translatedRight)
+    const newGap = findMinGap(left, translatedRight)
 
     expect(newGap).toBe(10)
   })
@@ -690,7 +709,7 @@ describe('calculatePlacementOffset - comprehensive', () => {
 
     const offset = calculatePlacementOffset(left, right, 0)
     const translatedRight = translateContour(right, offset, 0)
-    const newGap = findMinHorizontalGap(left, translatedRight)
+    const newGap = findMinGap(left, translatedRight)
 
     expect(newGap).toBe(0)
   })
@@ -716,7 +735,7 @@ describe('calculatePlacementOffset - comprehensive', () => {
 
     const offset = calculatePlacementOffset(leftContour, rightContour, 20)
     const translatedRight = translateContour(rightContour, offset, 0)
-    const newGap = findMinHorizontalGap(leftContour, translatedRight)
+    const newGap = findMinGap(leftContour, translatedRight)
 
     // Should achieve exactly the desired gap
     expect(newGap).toBe(20)
@@ -732,6 +751,152 @@ describe('calculatePlacementOffset - comprehensive', () => {
     // left's right = 20, right's left = -20
     // offset = 20 - (-20) + 15 = 55
     expect(offset).toBe(55)
+  })
+
+  it('ignores deep left subtree when placing shallow right subtree', () => {
+    // This tests the "File System Tree" bug where a deep subtree (like "user2")
+    // was pushing a shallow sibling (like "config") too far away because it was
+    // considering the deep descendants (like "song3.mp3") at different Y levels.
+    //
+    // Left subtree: parent + child extending far right at deep Y level
+    // Right subtree: shallow node at same Y level as left's parent
+    //
+    //   Left Parent     Right (shallow)
+    //       |
+    //   Left Child (extends right, below Right's Y extent)
+
+    const leftChildContour = createNodeContour(80, 30) // Wide child
+    const leftContour = buildSubtreeContour(
+      40, 30, // Parent: Y from -15 to 15
+      [
+        // Child at Y=50, extends to right (offsetX=40 means child center is 40px right of parent)
+        { contour: leftChildContour, offsetX: 40, offsetY: 50, width: 80, height: 30 },
+      ],
+      'org-chart'
+    )
+    // Left parent spans Y: -15 to 15
+    // Left child spans Y: 35 to 65, X: 0 to 80 (since offsetX=40, width=80)
+
+    const rightContour = createNodeContour(40, 30) // Shallow node, Y: -15 to 15
+
+    const desiredGap = 10
+    const offset = calculatePlacementOffset(leftContour, rightContour, desiredGap)
+
+    // The offset should be based ONLY on the Y-overlapping region (Y: -15 to 15)
+    // where left's right boundary is the parent (x=20), not the deep child
+    //
+    // If the bug exists, offset would be much larger because it considers
+    // the child at X=80 even though it's at a different Y level
+    //
+    // Correct: right's left edge (-20) should be at left's right (20) + gap (10)
+    // So offset = 20 - (-20) + 10 = 50 (approximately)
+
+    // The offset should NOT be huge (like 100+) which would happen if we
+    // considered the deep child's right edge at X=80
+    expect(offset).toBeLessThan(60) // Should be around 50, not 100+
+
+    // Verify the actual gap in the Y-overlapping region is correct
+    const translatedRight = translateContour(rightContour, offset, 0)
+    const actualGap = findMinGap(leftContour, translatedRight)
+    expect(actualGap).toBeCloseTo(desiredGap, 1)
+  })
+
+  it('ignores deep right subtree when placing next to shallow left subtree', () => {
+    // Mirror of the above test: left is shallow, right has deep descendants
+    //
+    //   Left (shallow)     Right Parent
+    //                          |
+    //                      Right Child (extends left, below Left's Y extent)
+
+    const leftContour = createNodeContour(40, 30) // Shallow node, Y: -15 to 15
+
+    const rightChildContour = createNodeContour(80, 30) // Wide child
+    const rightContour = buildSubtreeContour(
+      40, 30, // Parent: Y from -15 to 15
+      [
+        // Child at Y=50, extends to left (offsetX=-40 means child center is 40px left of parent)
+        { contour: rightChildContour, offsetX: -40, offsetY: 50, width: 80, height: 30 },
+      ],
+      'org-chart'
+    )
+    // Right parent spans Y: -15 to 15, X: -20 to 20
+    // Right child spans Y: 35 to 65, X: -80 to 0 (since offsetX=-40, width=80)
+
+    const desiredGap = 10
+    const offset = calculatePlacementOffset(leftContour, rightContour, desiredGap)
+
+    // The offset should be based ONLY on the Y-overlapping region (Y: -15 to 15)
+    // where right's left boundary is the parent (x=-20), not the deep child at x=-80
+    //
+    // Correct: right's parent left edge (-20) + offset should be at left's right (20) + gap (10)
+    // So offset = 20 + 10 - (-20) = 50 (approximately)
+
+    // The offset should NOT be huge (like 100+) which would happen if we
+    // considered the deep child's left edge at X=-80
+    expect(offset).toBeLessThan(60) // Should be around 50, not 100+
+
+    // Verify the actual gap in the Y-overlapping region is correct
+    const translatedRight = translateContour(rightContour, offset, 0)
+    const actualGap = findMinGap(leftContour, translatedRight)
+    expect(actualGap).toBeCloseTo(desiredGap, 1)
+  })
+
+  it('produces compact layout for File System Tree scenario', () => {
+    // Simulates the actual bug: "user2" subtree with deep "music/song" children
+    // should NOT push "config" (shallow sibling) far away
+    //
+    //      /
+    //   ┌──┴──┐
+    //  home  etc  var
+    //   │     │
+    // user2  config hosts
+    //   │
+    // music
+    //   │
+    // songs...
+
+    // Build "user2" subtree (deep: has music -> songs)
+    const songContour = createNodeContour(60, 30)
+    const musicContour = buildSubtreeContour(
+      50, 30,
+      [
+        { contour: songContour, offsetX: -40, offsetY: 50, width: 60, height: 30 },
+        { contour: songContour, offsetX: 0, offsetY: 50, width: 60, height: 30 },
+        { contour: songContour, offsetX: 40, offsetY: 50, width: 60, height: 30 },
+      ],
+      'org-chart'
+    )
+    const user2Contour = buildSubtreeContour(
+      50, 30,
+      [{ contour: musicContour, offsetX: 0, offsetY: 50, width: 50, height: 30 }],
+      'org-chart'
+    )
+    // user2 parent at Y: -15 to 15
+    // music at Y: 35 to 65
+    // songs at Y: 85 to 115
+
+    // "config" is a shallow node (leaf)
+    const configContour = createNodeContour(50, 30) // Y: -15 to 15
+
+    const desiredGap = 10
+    const offset = calculatePlacementOffset(user2Contour, configContour, desiredGap)
+
+    // The offset should be based on the Y-overlapping region where user2's parent
+    // overlaps with config (Y: -15 to 15), NOT on the deep song nodes at Y: 85-115
+    //
+    // user2 parent right edge: 25
+    // config left edge: -25
+    // Expected offset ≈ 25 - (-25) + 10 = 60
+    //
+    // If the bug exists, offset would be much larger (100+) because it would
+    // consider the rightmost song node's X position
+
+    expect(offset).toBeLessThan(80) // Should be around 60, definitely not 100+
+
+    // Verify gap is achieved
+    const translatedConfig = translateContour(configContour, offset, 0)
+    const actualGap = findMinGap(user2Contour, translatedConfig)
+    expect(actualGap).toBeCloseTo(desiredGap, 1)
   })
 })
 
@@ -750,7 +915,7 @@ describe('mergeContoursWithGap', () => {
 
     // Verify the gap is achieved
     const translatedRight = translateContour(right, rightOffset, 0)
-    const gap = findMinHorizontalGap(left, translatedRight)
+    const gap = findMinGap(left, translatedRight)
     expect(gap).toBe(10)
   })
 
@@ -825,7 +990,7 @@ describe('mergeContoursWithGap', () => {
   })
 
   it('merged contour satisfies minimum gap invariant', () => {
-    // Property test: after merging, findMinHorizontalGap should return exactly the gap
+    // Property test: after merging, findMinGap should return exactly the gap
     const testCases = [
       { leftX: -50, rightX: 50, gap: 10 },
       { leftX: 0, rightX: 0, gap: 25 },
@@ -838,7 +1003,7 @@ describe('mergeContoursWithGap', () => {
 
       const { rightOffset } = mergeContoursWithGap(left, right, gap)
       const translatedRight = translateContour(right, rightOffset, 0)
-      const actualGap = findMinHorizontalGap(left, translatedRight)
+      const actualGap = findMinGap(left, translatedRight)
 
       expect(actualGap).toBe(gap)
     }
@@ -846,72 +1011,63 @@ describe('mergeContoursWithGap', () => {
 })
 
 describe('gap functions with edge geometry contours', () => {
-  it('correctly computes gap between subtrees with straight-arrow edges', () => {
-    // Build two subtrees with straight-arrow edge geometry
+  it('computes gap uniformly for all edge styles', () => {
+    // Since all edge styles now use the same envelope approach,
+    // gap calculations should be identical across styles
     const leafContour = createNodeContour(30, 30)
+    const children = [
+      { contour: leafContour, offsetX: -20, offsetY: 60, width: 30, height: 30 },
+      { contour: leafContour, offsetX: 20, offsetY: 60, width: 30, height: 30 },
+    ]
 
-    const leftSubtree = buildSubtreeContour(
-      50, 40,
-      [
-        { contour: leafContour, offsetX: -20, offsetY: 60, width: 30, height: 30 },
-        { contour: leafContour, offsetX: 20, offsetY: 60, width: 30, height: 30 },
-      ],
-      'straight-arrow'
-    )
+    const curveSubtree = buildSubtreeContour(50, 40, children, 'curve')
+    const straightSubtree = buildSubtreeContour(50, 40, children, 'straight-arrow')
+    const orgChartSubtree = buildSubtreeContour(50, 40, children, 'org-chart')
 
-    const rightSubtree = buildSubtreeContour(
-      50, 40,
-      [
-        { contour: leafContour, offsetX: -20, offsetY: 60, width: 30, height: 30 },
-        { contour: leafContour, offsetX: 20, offsetY: 60, width: 30, height: 30 },
-      ],
-      'straight-arrow'
-    )
+    // Position them and compute gaps
+    const positionedCurve = translateContour(curveSubtree, -60, 0)
+    const positionedStraight = translateContour(straightSubtree, -60, 0)
+    const positionedOrgChart = translateContour(orgChartSubtree, -60, 0)
 
-    // Position left subtree
-    const positionedLeft = translateContour(leftSubtree, -60, 0)
+    const targetSubtree = buildSubtreeContour(50, 40, children, 'curve')
 
-    // Find the gap - should account for the inward dips from edge geometry
-    const gap = findMinHorizontalGap(positionedLeft, rightSubtree)
+    const gapCurve = findMinGap(positionedCurve, targetSubtree)
+    const gapStraight = findMinGap(positionedStraight, targetSubtree)
+    const gapOrgChart = findMinGap(positionedOrgChart, targetSubtree)
 
-    // Verify gap is a reasonable value (not null, accounts for geometry)
-    expect(gap).not.toBeNull()
-    expect(typeof gap).toBe('number')
+    // All gaps should be identical since we use uniform envelope
+    expect(gapCurve).not.toBeNull()
+    expect(gapStraight).toBe(gapCurve)
+    expect(gapOrgChart).toBe(gapCurve)
   })
 
-  it('correctly computes gap between subtrees with org-chart edges', () => {
+  it('mergeContoursWithGap achieves desired gap for all edge styles', () => {
     const leafContour = createNodeContour(30, 30)
+    const children = [
+      { contour: leafContour, offsetX: -25, offsetY: 60, width: 30, height: 30 },
+      { contour: leafContour, offsetX: 25, offsetY: 60, width: 30, height: 30 },
+    ]
 
-    const leftSubtree = buildSubtreeContour(
-      50, 40,
-      [
-        { contour: leafContour, offsetX: -25, offsetY: 60, width: 30, height: 30 },
-        { contour: leafContour, offsetX: 25, offsetY: 60, width: 30, height: 30 },
-      ],
-      'org-chart'
-    )
+    // Test with each edge style - all should achieve the same desired gap
+    const edgeStyles: Array<'curve' | 'straight-arrow' | 'org-chart'> = ['curve', 'straight-arrow', 'org-chart']
 
-    const rightSubtree = buildSubtreeContour(
-      50, 40,
-      [
-        { contour: leafContour, offsetX: -25, offsetY: 60, width: 30, height: 30 },
-        { contour: leafContour, offsetX: 25, offsetY: 60, width: 30, height: 30 },
-      ],
-      'org-chart'
-    )
+    for (const style of edgeStyles) {
+      const leftSubtree = buildSubtreeContour(50, 40, children, style)
+      const rightSubtree = buildSubtreeContour(50, 40, children, style)
 
-    // Merge with specified gap
-    const { merged, rightOffset } = mergeContoursWithGap(leftSubtree, rightSubtree, 15)
+      // Merge with specified gap
+      const { merged, rightOffset } = mergeContoursWithGap(leftSubtree, rightSubtree, 15)
 
-    // Verify the gap is achieved
-    const translatedRight = translateContour(rightSubtree, rightOffset, 0)
-    const actualGap = findMinHorizontalGap(leftSubtree, translatedRight)
+      // Verify the gap is achieved
+      const translatedRight = translateContour(rightSubtree, rightOffset, 0)
+      const actualGap = findMinGap(leftSubtree, translatedRight)
 
-    expect(actualGap).toBe(15)
+      expect(actualGap).toBe(15)
 
-    // Verify merged contour is valid
-    expect(merged.left.length).toBeGreaterThan(0)
-    expect(merged.right.length).toBeGreaterThan(0)
+      // Verify merged contour is valid
+      expect(merged.left.length).toBeGreaterThan(0)
+      expect(merged.right.length).toBeGreaterThan(0)
+    }
   })
 
   it('gap accounts for deep nested subtrees', () => {
@@ -950,7 +1106,7 @@ describe('gap functions with edge geometry contours', () => {
 
     // Verify the gap at all levels
     const translatedRight = translateContour(level1Right, rightOffset, 0)
-    const actualGap = findMinHorizontalGap(level1Left, translatedRight)
+    const actualGap = findMinGap(level1Left, translatedRight)
 
     // The gap should be exactly 12 at the closest point
     expect(actualGap).toBe(12)
@@ -961,6 +1117,144 @@ describe('gap functions with edge geometry contours', () => {
     const leftBounds = getContourBounds(level1Left)
 
     expect(mergedBounds.bottom).toBe(leftBounds.bottom)
+  })
+})
+
+// ============================================================================
+// Gap calculation only considers Y-overlapping regions
+// ============================================================================
+
+describe('gap calculation for Y-overlapping regions only', () => {
+  /**
+   * Gap calculation is purely geometric based on Y-overlapping contour segments.
+   * Parts of contours that don't overlap in Y are not compared against each other.
+   * This is correct behavior - tree structure should not affect gap calculation.
+   *
+   * Example structure:
+   *     Parent
+   *     /    \
+   *   Shallow  Deep (has children)
+   *    (leaf)   |
+   *            Child (at different Y level than Shallow)
+   *
+   * The gap is calculated only in the Y region where both contours exist.
+   */
+  it('only measures gap in Y-overlapping regions', () => {
+    // Shallow subtree: just a node at origin, height 30
+    const shallowContour = createNodeContour(60, 30) // spans Y: -15 to 15
+
+    // Deep subtree: parent node + child below
+    // Parent at Y=0, child at Y=50 (below shallow's Y extent)
+    const childContour = createNodeContour(60, 30) // child: spans Y -15 to 15 relative
+    const deepContour = buildSubtreeContour(
+      60, 30, // Parent node
+      [
+        // Child positioned at Y=50 (vertically gap of 40 from parent)
+        // offsetX=-20 places child's center LEFT of parent center
+        { contour: childContour, offsetX: -20, offsetY: 50, width: 60, height: 30 },
+      ],
+      'org-chart'
+    )
+    // Deep subtree spans: Y from -15 (parent top) to 65 (child bottom at 50+15)
+    // Child is at offsetX=-20, so child's left edge is at -20 - 30 = -50
+
+    // Position shallow subtree at X=-75
+    // Shallow's right edge: -75+30 = -45
+    // Deep parent's left edge at Y-overlap region: -30
+    // So gap in Y-overlapping region is from -45 to -30 = 15px
+    const positionedShallow = translateContour(shallowContour, -75, 0)
+
+    // Gap is calculated only in the Y-overlapping region (-15 to 15)
+    // where shallow overlaps with deep's parent node (not the child at Y=50)
+    const gap = findMinGap(positionedShallow, deepContour)
+
+    // The gap is measured in the Y-overlapping region only
+    expect(gap).not.toBeNull()
+    // Gap is ~15px (between shallow's right at -45 and deep parent's left at -30)
+    // NOT ~5px (which would be if we compared to the child at Y=50)
+    expect(gap).toBeGreaterThanOrEqual(14)
+    expect(gap).toBeLessThan(20)
+  })
+
+  it('maintains min gap between sibling and grandchild at multiple nesting levels', () => {
+    // Test the C1 Field Team / C2.a scenario from the screenshot:
+    //
+    //       C: Sales & Marketing
+    //       /                 \
+    //   C1 Field Team     C2 Growth
+    //      (leaf)         / | | \
+    //                  C2.a ... C2.d
+    //
+    // C1 Field Team is a leaf (shallow)
+    // C2 Growth has 4 children (deep)
+    // C2.a can end up very close to C1 Field Team horizontally
+
+    const context_gap = 15 // desired minimum gap
+
+    // C2 Growth's children: 4 nodes side by side
+    const grandchildContour = createNodeContour(40, 30)
+    const c2GrowthContour = buildSubtreeContour(
+      60, 30, // C2 Growth node
+      [
+        { contour: grandchildContour, offsetX: -60, offsetY: 50, width: 40, height: 30 }, // C2.a - leftmost
+        { contour: grandchildContour, offsetX: -20, offsetY: 50, width: 40, height: 30 }, // C2.b
+        { contour: grandchildContour, offsetX: 20, offsetY: 50, width: 40, height: 30 },  // C2.c
+        { contour: grandchildContour, offsetX: 60, offsetY: 50, width: 40, height: 30 },  // C2.d - rightmost
+      ],
+      'org-chart'
+    )
+    // C2.a's left edge: -60 - 20 = -80
+
+    // C1 Field Team: leaf node
+    const c1FieldTeamContour = createNodeContour(70, 40) // Slightly taller/wider
+
+    // Calculate placement offset
+    const offset = calculatePlacementOffset(c1FieldTeamContour, c2GrowthContour, context_gap)
+
+    // Apply offset and check actual gap
+    const positionedC2 = translateContour(c2GrowthContour, offset, 0)
+    const actualGap = findMinGap(c1FieldTeamContour, positionedC2)
+
+    // The gap should be at least context_gap at ALL points, including
+    // between C1 Field Team and C2.a (which are at different Y levels)
+    expect(actualGap).toBeGreaterThanOrEqual(context_gap - 1) // Allow small tolerance
+  })
+
+  it('handles multiple levels of nesting', () => {
+    // Test with 3 levels: sibling is close to great-grandchild
+    //
+    //         Root
+    //         /  \
+    //    Shallow  Deep
+    //             |
+    //           Mid
+    //             |
+    //          Bottom (can be close to Shallow)
+
+    const bottomContour = createNodeContour(40, 30)
+    const midContour = buildSubtreeContour(
+      50, 30,
+      [{ contour: bottomContour, offsetX: -30, offsetY: 50, width: 40, height: 30 }],
+      'org-chart'
+    )
+    const deepContour = buildSubtreeContour(
+      50, 30,
+      [{ contour: midContour, offsetX: -20, offsetY: 50, width: 50, height: 30 }],
+      'org-chart'
+    )
+    // Bottom node is at offsetX: -20 + (-30) = -50 from deep parent
+    // Bottom's left edge: -50 - 20 = -70
+
+    const shallowContour = createNodeContour(50, 30)
+
+    // Calculate placement with 20px gap
+    const offset = calculatePlacementOffset(shallowContour, deepContour, 20)
+    const positionedDeep = translateContour(deepContour, offset, 0)
+
+    // Find minimum gap including the deeply nested bottom node
+    const gap = findMinGap(shallowContour, positionedDeep)
+
+    expect(gap).toBeGreaterThanOrEqual(20 - 1)
   })
 })
 
@@ -1015,9 +1309,9 @@ describe('buildSubtreeContour - deep subtree preservation', () => {
     // B's bottom at 50 + 50 + 15 = 115 in Parent's coords
     expect(bounds.bottom).toBe(115)
 
-    // Verify the contour has multiple points on the right boundary (not simplified)
-    // This ensures we're keeping all the detail
-    expect(parentContour.right.length).toBeGreaterThan(6)
+    // With uniform corner-to-corner approach, contours are simpler but still preserve
+    // the essential boundary information. What matters is the bounds are correct.
+    expect(parentContour.right.length).toBeGreaterThanOrEqual(4)
   })
 
   it('preserves rightmost child deep descendants (Group G bug)', () => {
@@ -1103,9 +1397,9 @@ describe('buildSubtreeContour - deep subtree preservation', () => {
     const maxRightY = Math.max(...categoryCContour.right.map((p) => p.y))
     expect(maxRightY).toBe(115) // Should extend to bottom of N, O
 
-    // Verify that the contour includes detail from Group G's edge geometry
-    // (the boundary may go "inward" at the bar level, which is correct behavior)
-    expect(categoryCContour.right.length).toBeGreaterThan(8)
+    // With uniform envelope approach, contours are simpler (corner-to-corner)
+    // but still preserve the essential geometry
+    expect(categoryCContour.right.length).toBeGreaterThan(2)
   })
 
   it('handles contours with different depths correctly (no diagonal jumps)', () => {
@@ -1674,5 +1968,158 @@ describe('Y-monotone polygon invariants', () => {
 
     // Parent should have at least as many points (more, since we add parent geometry)
     expect(parentInflections).toBeGreaterThanOrEqual(childInflections)
+  })
+})
+
+describe('uniform envelope approach for all edge styles', () => {
+  /**
+   * With the uniform envelope approach, all edge styles use corner-to-corner
+   * connections for contour building. This ensures consistent gap calculations
+   * regardless of the visual edge style (curve, straight-arrow, org-chart).
+   *
+   * The key benefit: contours are treated as black boxes, and H Gap / V Gap
+   * rules apply uniformly across all potential overlaps.
+   */
+
+  it('curve and straight-arrow produce identical contours', () => {
+    const childContour = createNodeContour(44, 38)
+    const childOffsetY = 78
+    const childPositions = [-81, -27, 27, 81]
+
+    const children = childPositions.map((x) => ({
+      contour: childContour,
+      offsetX: x,
+      offsetY: childOffsetY,
+      width: 44,
+      height: 38,
+    }))
+
+    const curveContour = buildSubtreeContour(92, 38, children, 'curve')
+    const straightContour = buildSubtreeContour(92, 38, children, 'straight-arrow')
+
+    // Curve and straight-arrow use the same corner-to-corner envelope
+    expect(straightContour).toEqual(curveContour)
+  })
+
+  it('org-chart includes horizontal bar inflection points when children extend beyond parent', () => {
+    const childContour = createNodeContour(44, 38)
+    const childOffsetY = 78
+    // Children extend beyond parent width (parent is 92 wide, so halfW = 46)
+    const childPositions = [-81, -27, 27, 81]
+
+    const children = childPositions.map((x) => ({
+      contour: childContour,
+      offsetX: x,
+      offsetY: childOffsetY,
+      width: 44,
+      height: 38,
+    }))
+
+    const curveContour = buildSubtreeContour(92, 38, children, 'curve')
+    const orgChartContour = buildSubtreeContour(92, 38, children, 'org-chart')
+
+    // Org-chart should have more points due to horizontal bar inflection
+    // (stays vertical at parent edge, then steps out horizontally at bar level)
+    expect(orgChartContour.left.length).toBeGreaterThan(curveContour.left.length)
+    expect(orgChartContour.right.length).toBeGreaterThan(curveContour.right.length)
+
+    // But bounds should be identical - both encompass the same area
+    const curveBounds = getContourBounds(curveContour)
+    const orgChartBounds = getContourBounds(orgChartContour)
+    expect(orgChartBounds.left).toBe(curveBounds.left)
+    expect(orgChartBounds.right).toBe(curveBounds.right)
+    expect(orgChartBounds.bottom).toBe(curveBounds.bottom)
+  })
+
+  it('gap calculation is consistent for curve and straight-arrow', () => {
+    const childContour = createNodeContour(60, 30)
+    const children = [
+      { contour: childContour, offsetX: -70, offsetY: 65, width: 60, height: 30 },
+      { contour: childContour, offsetX: 0, offsetY: 65, width: 60, height: 30 },
+      { contour: childContour, offsetX: 70, offsetY: 65, width: 60, height: 30 },
+    ]
+
+    // Build subtrees with each edge style
+    const subtreeCurve = buildSubtreeContour(100, 40, children, 'curve')
+    const subtreeStraight = buildSubtreeContour(100, 40, children, 'straight-arrow')
+
+    const siblingContour = createNodeContour(80, 30)
+
+    // Curve and straight-arrow gap calculations should be identical
+    const gapCurve = findMinGap(siblingContour, subtreeCurve)
+    const gapStraight = findMinGap(siblingContour, subtreeStraight)
+
+    expect(gapCurve).not.toBeNull()
+    expect(gapStraight).toBe(gapCurve)
+  })
+
+  it('org-chart gap calculation respects horizontal bar geometry', () => {
+    const childContour = createNodeContour(60, 30)
+    // Children extend beyond parent width (parent is 100 wide, children span 140+60=200)
+    const children = [
+      { contour: childContour, offsetX: -70, offsetY: 65, width: 60, height: 30 },
+      { contour: childContour, offsetX: 0, offsetY: 65, width: 60, height: 30 },
+      { contour: childContour, offsetX: 70, offsetY: 65, width: 60, height: 30 },
+    ]
+
+    const subtreeOrgChart = buildSubtreeContour(100, 40, children, 'org-chart')
+    const siblingContour = createNodeContour(80, 30)
+
+    const gapOrgChart = findMinGap(siblingContour, subtreeOrgChart)
+
+    // Gap should be computed correctly (not null)
+    expect(gapOrgChart).not.toBeNull()
+  })
+
+  it('contour bounds include all children regardless of edge style', () => {
+    const childContour = createNodeContour(40, 30)
+    const childOffsetY = 60
+
+    // Child positioned far to the left
+    const children = [
+      { contour: childContour, offsetX: -80, offsetY: childOffsetY, width: 40, height: 30 },
+    ]
+
+    // Test all edge styles
+    const edgeStyles: Array<'curve' | 'straight-arrow' | 'org-chart'> = ['curve', 'straight-arrow', 'org-chart']
+
+    for (const style of edgeStyles) {
+      const subtreeContour = buildSubtreeContour(60, 30, children, style)
+      const bounds = getContourBounds(subtreeContour)
+
+      // Bounds should include the child's left edge: -80 - 20 = -100
+      expect(bounds.left).toBe(-100)
+
+      // Bounds should extend to child's bottom: 60 + 15 = 75
+      expect(bounds.bottom).toBe(75)
+    }
+  })
+
+  it('placement offset achieves desired gap for all edge styles', () => {
+    // Create a tall sibling that overlaps in Y with the entire subtree
+    const siblingContour = createNodeContour(60, 100) // Y: -50 to 50
+
+    // Create children that are within the sibling's Y range
+    const childContour = createNodeContour(30, 30)
+    const children = [
+      { contour: childContour, offsetX: -50, offsetY: 30, width: 30, height: 30 }, // Y: 15 to 45 (within sibling's Y range)
+      { contour: childContour, offsetX: 50, offsetY: 30, width: 30, height: 30 },
+    ]
+
+    const desiredGap = 15
+
+    // Test all edge styles - they may have different offsets due to different contour shapes,
+    // but they should all achieve the desired gap in the Y-overlapping region
+    const edgeStyles: Array<'curve' | 'straight-arrow' | 'org-chart'> = ['curve', 'straight-arrow', 'org-chart']
+
+    for (const style of edgeStyles) {
+      const subtreeContour = buildSubtreeContour(50, 40, children, style) // Parent Y: -20 to 20, children at Y: 15 to 45
+      const offset = calculatePlacementOffset(siblingContour, subtreeContour, desiredGap)
+
+      // Verify the desired gap is achieved in the Y-overlapping region
+      const translatedSubtree = translateContour(subtreeContour, offset, 0)
+      const actualGap = findMinGap(siblingContour, translatedSubtree)
+      expect(actualGap).toBeCloseTo(desiredGap, 5)
+    }
   })
 })

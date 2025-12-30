@@ -41,12 +41,13 @@ const edgeStyleOptions: { value: EdgeStyle; label: string; icon: string }[] = [
   { value: 'org-chart', label: 'Org Chart', icon: mdiSitemapOutline }
 ]
 
-// Layout algorithm options (2x2 grid)
+// Layout algorithm options
 const layoutAlgorithmOptions: { value: LayoutAlgorithmType; label: string }[] = [
   { value: 'maxwidth', label: 'Centered' },
   { value: 'top-align', label: 'Top Align' },
   { value: 'lr-squeeze', label: 'LR Squeeze' },
-  { value: 'rl-squeeze', label: 'RL Squeeze' }
+  { value: 'rl-squeeze', label: 'RL Squeeze' },
+  { value: 'tidy', label: 'Tidy' }
 ]
 
 // Computed bindings for v-model
@@ -213,8 +214,8 @@ const nodePadding = computed({
 
           <v-slider
             v-model="horizontalGap"
-            label="H Gap"
-            :min="10"
+            label="Min Gap"
+            :min="5"
             :max="100"
             :step="5"
             thumb-label
@@ -229,8 +230,8 @@ const nodePadding = computed({
 
           <v-slider
             v-model="verticalGap"
-            label="V Gap"
-            :min="20"
+            label="Line Spacing"
+            :min="5"
             :max="150"
             :step="5"
             thumb-label

@@ -149,7 +149,7 @@ export function buildSubtreeContour(
   parentWidth: number,
   parentHeight: number,
   children: ChildContourInfo[],
-  edgeStyle: EdgeContourStyle
+  _edgeStyle: EdgeContourStyle
 ): YMonotonePolygon {
   // Start with parent node contour
   if (children.length === 0) {
@@ -177,48 +177,129 @@ export function buildSubtreeContour(
   // that extend below the rightmost child, and we need to include them
   const childrenUnion = unionContours(translatedContours)
 
-  // Build the contour based on edge style
-  switch (edgeStyle) {
-    case 'curve':
-      return buildCurveEdgeContour(
-        parentHalfW,
-        parentHalfH,
-        parentBottom,
-        leftChild,
-        rightChild,
-        childrenUnion
-      )
-
-    case 'straight-arrow':
-      return buildArrowEdgeContour(
-        parentHalfW,
-        parentHalfH,
-        parentBottom,
-        leftChild,
-        rightChild,
-        childrenUnion
-      )
-
-    case 'org-chart':
-      return buildOrgChartEdgeContour(
-        parentHalfW,
-        parentHalfH,
-        parentBottom,
-        leftChild,
-        rightChild,
-        sortedChildren,
-        childrenUnion
-      )
+  // Build the contour based on edge style.
+  // - curve/straight-arrow: corner-to-corner diagonal (simple envelope)
+  // - org-chart: includes horizontal bar geometry for accurate spacing
+  if (_edgeStyle === 'org-chart') {
+    return buildOrgChartEnvelopeContour(
+      parentHalfW,
+      parentHalfH,
+      parentBottom,
+      leftChild,
+      rightChild,
+      childrenUnion
+    )
   }
+
+  // For curve and straight-arrow, use corner-to-corner envelope
+  return buildEnvelopeContour(
+    parentHalfW,
+    parentHalfH,
+    parentBottom,
+    leftChild,
+    rightChild,
+    childrenUnion
+  )
 }
 
 /**
- * Build contour for curve edges (corner-to-corner diagonals).
+ * Build contour for org-chart edge style, which tightly hugs the edge geometry.
  *
- * The edge visually goes from parent's bottom corners to children's top corners,
- * so the contour follows the same path.
+ * Org-chart edges draw:
+ * 1. A vertical line from parent bottom center down to a "bar Y" level
+ * 2. A horizontal bar from leftmost child's CENTER x to rightmost child's CENTER x
+ * 3. Vertical drops from the bar to each child's top center
+ *
+ * The contour traces this shape efficiently:
+ * - Diagonal from parent corner to bar endpoint (child's center x at barY)
+ * - Vertical drop to child's top center
+ * - Horizontal step to child's outer edge
+ * - Then follows the child's contour
+ *
+ * This gives 6 inflection points that tightly hug the actual edge geometry,
+ * rather than over-claiming space with perpendicular steps.
  */
-function buildCurveEdgeContour(
+function buildOrgChartEnvelopeContour(
+  parentHalfW: number,
+  parentHalfH: number,
+  parentBottom: number,
+  leftChild: ChildContourInfo,
+  rightChild: ChildContourInfo,
+  childrenUnion: YMonotonePolygon
+): YMonotonePolygon {
+  const leftChildTop = leftChild.offsetY - leftChild.height / 2
+  const leftChildLeft = leftChild.offsetX - leftChild.width / 2
+  const leftChildCenterX = leftChild.offsetX // Where bar actually connects
+  const rightChildTop = rightChild.offsetY - rightChild.height / 2
+  const rightChildRight = rightChild.offsetX + rightChild.width / 2
+  const rightChildCenterX = rightChild.offsetX // Where bar actually connects
+
+  // Bar Y is at the midpoint between parent bottom and children top
+  // (this matches where the rendering draws the horizontal bar)
+  const childrenTopY = Math.min(leftChildTop, rightChildTop)
+  const barY = parentBottom + (childrenTopY - parentBottom) / 2
+
+  // Left boundary: 6 key points that hug the edge geometry
+  const left: ContourPoint[] = [
+    { x: -parentHalfW, y: -parentHalfH }, // 1. Parent top-left
+    { x: -parentHalfW, y: parentBottom }, // 2. Parent bottom-left
+  ]
+
+  // The bar ends at the leftmost child's CENTER, not its edge
+  // Use diagonal from parent corner to bar endpoint, then drop and step out
+  if (leftChildCenterX < -parentHalfW) {
+    // Bar extends beyond parent - diagonal to bar end, drop, step to edge
+    left.push({ x: leftChildCenterX, y: barY }) // 3. Diagonal to bar endpoint
+    left.push({ x: leftChildCenterX, y: leftChildTop }) // 4. Drop to child top center
+    left.push({ x: leftChildLeft, y: leftChildTop }) // 5. Step to child left edge
+  } else {
+    // Child center is within parent width - diagonal to child's corner
+    left.push({ x: leftChildLeft, y: leftChildTop })
+  }
+
+  // Add rest of the UNION's left boundary (skip points above the connection)
+  for (const p of childrenUnion.left) {
+    if (p.y > leftChildTop + Y_EPSILON) {
+      left.push(p) // 6+ from children
+    }
+  }
+
+  // Right boundary: mirror of left
+  const right: ContourPoint[] = [
+    { x: parentHalfW, y: -parentHalfH }, // 1. Parent top-right
+    { x: parentHalfW, y: parentBottom }, // 2. Parent bottom-right
+  ]
+
+  // The bar ends at the rightmost child's CENTER, not its edge
+  if (rightChildCenterX > parentHalfW) {
+    // Bar extends beyond parent - diagonal to bar end, drop, step to edge
+    right.push({ x: rightChildCenterX, y: barY }) // 3. Diagonal to bar endpoint
+    right.push({ x: rightChildCenterX, y: rightChildTop }) // 4. Drop to child top center
+    right.push({ x: rightChildRight, y: rightChildTop }) // 5. Step to child right edge
+  } else {
+    // Child center is within parent width - diagonal to child's corner
+    right.push({ x: rightChildRight, y: rightChildTop })
+  }
+
+  // Add rest of the UNION's right boundary (skip points above the connection)
+  for (const p of childrenUnion.right) {
+    if (p.y > rightChildTop + Y_EPSILON) {
+      right.push(p) // 6+ from children
+    }
+  }
+
+  return { left, right }
+}
+
+/**
+ * Build a uniform envelope contour for curve and straight-arrow edge styles.
+ *
+ * Uses corner-to-corner connections (parent bottom corners to child top corners)
+ * which correctly envelopes all subtree geometry. This simple diagonal approach
+ * works well for curve and straight-arrow edges where the visual rendering
+ * stays within the diagonal envelope.
+ */
+function buildEnvelopeContour(
   parentHalfW: number,
   parentHalfH: number,
   parentBottom: number,
@@ -263,163 +344,6 @@ function buildCurveEdgeContour(
   }
 
   // Add rest of the UNION's right boundary (skip points above the connection)
-  // Include all points to retain full detail for layout calculations
-  for (const p of childrenUnion.right) {
-    if (p.y > rightChildTop + Y_EPSILON) {
-      right.push(p)
-    }
-  }
-
-  return { left, right }
-}
-
-/**
- * Build contour for arrow/straight edges (center-to-center diagonals).
- *
- * The edge goes from parent's bottom-center to each child's top-center,
- * creating triangular regions on the sides.
- */
-function buildArrowEdgeContour(
-  parentHalfW: number,
-  parentHalfH: number,
-  parentBottom: number,
-  leftChild: ChildContourInfo,
-  rightChild: ChildContourInfo,
-  childrenUnion: YMonotonePolygon
-): YMonotonePolygon {
-  const leftChildTop = leftChild.offsetY - leftChild.height / 2
-  const leftChildLeft = leftChild.offsetX - leftChild.width / 2
-  const leftChildCenterX = leftChild.offsetX
-
-  const rightChildTop = rightChild.offsetY - rightChild.height / 2
-  const rightChildRight = rightChild.offsetX + rightChild.width / 2
-  const rightChildCenterX = rightChild.offsetX
-
-  // Left boundary:
-  // parent top-left → parent bottom-left → parent bottom-center →
-  // leftmost child top-center (diagonal) → child top-left →
-  // down to child bottom-left → union's left boundary (below child)
-  const left: ContourPoint[] = [
-    { x: -parentHalfW, y: -parentHalfH }, // Parent top-left
-    { x: -parentHalfW, y: parentBottom }, // Parent bottom-left
-    { x: 0, y: parentBottom }, // Parent bottom-center
-  ]
-
-  // Diagonal to leftmost child's top-center
-  if (leftChildTop > parentBottom) {
-    left.push({ x: leftChildCenterX, y: leftChildTop })
-    // Horizontal to child's top-left corner
-    left.push({ x: leftChildLeft, y: leftChildTop })
-  }
-
-  // Add union's left boundary points BELOW the child's top
-  // Include all points to retain full detail for layout calculations
-  for (const p of childrenUnion.left) {
-    if (p.y > leftChildTop + Y_EPSILON) {
-      left.push(p)
-    }
-  }
-
-  // Right boundary:
-  // parent top-right → parent bottom-right → parent bottom-center →
-  // rightmost child top-center (diagonal) → child top-right →
-  // union's right boundary (below child top)
-  const right: ContourPoint[] = [
-    { x: parentHalfW, y: -parentHalfH }, // Parent top-right
-    { x: parentHalfW, y: parentBottom }, // Parent bottom-right
-    { x: 0, y: parentBottom }, // Parent bottom-center
-  ]
-
-  // Diagonal to rightmost child's top-center
-  if (rightChildTop > parentBottom) {
-    right.push({ x: rightChildCenterX, y: rightChildTop })
-    // Horizontal to child's top-right corner
-    right.push({ x: rightChildRight, y: rightChildTop })
-  }
-
-  // Add union's right boundary points BELOW the child's top
-  // Include all points to retain full detail for layout calculations
-  for (const p of childrenUnion.right) {
-    if (p.y > rightChildTop + Y_EPSILON) {
-      right.push(p)
-    }
-  }
-
-  return { left, right }
-}
-
-/**
- * Build contour for org-chart edges (rectangular segments).
- *
- * The edge structure is:
- * - Vertical drop from parent bottom-center to horizontal bar
- * - Horizontal bar spanning all children
- * - Vertical drops from bar to each child's top-center
- */
-function buildOrgChartEdgeContour(
-  parentHalfW: number,
-  parentHalfH: number,
-  parentBottom: number,
-  leftChild: ChildContourInfo,
-  rightChild: ChildContourInfo,
-  sortedChildren: ChildContourInfo[],
-  childrenUnion: YMonotonePolygon
-): YMonotonePolygon {
-  // Find the topmost child to determine bar position
-  const topmostChildTop = Math.min(
-    ...sortedChildren.map((c) => c.offsetY - c.height / 2)
-  )
-
-  // Bar Y is midpoint between parent bottom and topmost child
-  const barY = (parentBottom + topmostChildTop) / 2
-
-  const leftChildTop = leftChild.offsetY - leftChild.height / 2
-  const leftChildLeft = leftChild.offsetX - leftChild.width / 2
-  const leftChildCenterX = leftChild.offsetX
-
-  const rightChildTop = rightChild.offsetY - rightChild.height / 2
-  const rightChildRight = rightChild.offsetX + rightChild.width / 2
-  const rightChildCenterX = rightChild.offsetX
-
-  // Left boundary:
-  // parent top-left → parent bottom-left → parent bottom-center →
-  // down to bar → horizontal to leftmost child center →
-  // down to child top → horizontal to child top-left →
-  // union's left boundary (below child top)
-  const left: ContourPoint[] = [
-    { x: -parentHalfW, y: -parentHalfH }, // Parent top-left
-    { x: -parentHalfW, y: parentBottom }, // Parent bottom-left
-    { x: 0, y: parentBottom }, // Parent bottom-center
-    { x: 0, y: barY }, // Vertical drop to bar
-    { x: leftChildCenterX, y: barY }, // Horizontal along bar to leftmost child
-    { x: leftChildCenterX, y: leftChildTop }, // Vertical drop to child top
-    { x: leftChildLeft, y: leftChildTop }, // Horizontal to child top-left
-  ]
-
-  // Add union's left boundary points BELOW the child's top
-  // Include all points to retain full detail for layout calculations
-  for (const p of childrenUnion.left) {
-    if (p.y > leftChildTop + Y_EPSILON) {
-      left.push(p)
-    }
-  }
-
-  // Right boundary:
-  // parent top-right → parent bottom-right → parent bottom-center →
-  // down to bar → horizontal to rightmost child center →
-  // down to child top → horizontal to child top-right →
-  // union's right boundary (below child top)
-  const right: ContourPoint[] = [
-    { x: parentHalfW, y: -parentHalfH }, // Parent top-right
-    { x: parentHalfW, y: parentBottom }, // Parent bottom-right
-    { x: 0, y: parentBottom }, // Parent bottom-center
-    { x: 0, y: barY }, // Vertical drop to bar
-    { x: rightChildCenterX, y: barY }, // Horizontal along bar to rightmost child
-    { x: rightChildCenterX, y: rightChildTop }, // Vertical drop to child top
-    { x: rightChildRight, y: rightChildTop }, // Horizontal to child top-right
-  ]
-
-  // Add union's right boundary points BELOW the child's top
   // Include all points to retain full detail for layout calculations
   for (const p of childrenUnion.right) {
     if (p.y > rightChildTop + Y_EPSILON) {
@@ -727,22 +651,78 @@ function interpolateRightBoundaryX(boundary: ContourPoint[], y: number): number 
 }
 
 // ============================================================================
+// Segment Distance Calculation
+// ============================================================================
+
+/**
+ * Compute the minimum Euclidean distance between two line segments.
+ *
+ * This properly handles diagonal segments that may approach each other
+ * more closely than their horizontal gap at any Y level would suggest.
+ */
+function minDistanceBetweenSegments(
+  ax1: number,
+  ay1: number,
+  ax2: number,
+  ay2: number,
+  bx1: number,
+  by1: number,
+  bx2: number,
+  by2: number
+): number {
+  // Check all four endpoint-to-segment distances
+  const d1 = pointToSegmentDistance(ax1, ay1, bx1, by1, bx2, by2)
+  const d2 = pointToSegmentDistance(ax2, ay2, bx1, by1, bx2, by2)
+  const d3 = pointToSegmentDistance(bx1, by1, ax1, ay1, ax2, ay2)
+  const d4 = pointToSegmentDistance(bx2, by2, ax1, ay1, ax2, ay2)
+
+  return Math.min(d1, d2, d3, d4)
+}
+
+/**
+ * Compute the distance from a point to a line segment.
+ */
+function pointToSegmentDistance(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+): number {
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const lengthSq = dx * dx + dy * dy
+
+  if (lengthSq === 0) {
+    // Segment is a point
+    return Math.sqrt((px - x1) * (px - x1) + (py - y1) * (py - y1))
+  }
+
+  // Parameter t for the projection of point onto the line
+  let t = ((px - x1) * dx + (py - y1) * dy) / lengthSq
+
+  // Clamp t to [0, 1] to stay within the segment
+  t = Math.max(0, Math.min(1, t))
+
+  // Find the closest point on the segment
+  const closestX = x1 + t * dx
+  const closestY = y1 + t * dy
+
+  return Math.sqrt((px - closestX) * (px - closestX) + (py - closestY) * (py - closestY))
+}
+
+// ============================================================================
 // Intersection Detection (for subtree placement)
 // ============================================================================
 
 /**
- * Find the minimum horizontal gap between two contours at their overlapping y-range.
+ * Find the minimum horizontal gap between two contours (signed).
+ * Used for determining placement direction.
  *
- * This is used to determine how close two subtrees can be placed:
- * - leftContour: right boundary of the left subtree
- * - rightContour: left boundary of the right subtree
- *
- * @param leftContour The left subtree's contour
- * @param rightContour The right subtree's contour (at its current position)
- * @returns The minimum horizontal distance (right.left.x - left.right.x) in the overlap region,
- *          or null if the contours don't overlap in y
+ * @returns Positive if contours are separated, negative if overlapping
  */
-export function findMinHorizontalGap(
+function findSignedHorizontalGap(
   leftContour: YMonotonePolygon,
   rightContour: YMonotonePolygon
 ): number | null {
@@ -775,11 +755,6 @@ export function findMinHorizontalGap(
 
   const sortedYs = Array.from(yBreakpoints).sort((a, b) => a - b)
 
-  // Find minimum gap
-  // Use the specialized interpolation functions that return the correct extreme values:
-  // - For left contour's RIGHT boundary: we want the MAX x (rightmost point)
-  // - For right contour's LEFT boundary: we want the MIN x (leftmost point)
-  // This ensures correct gap calculation even for horizontal segments
   let minGap = Infinity
 
   for (const y of sortedYs) {
@@ -796,12 +771,113 @@ export function findMinHorizontalGap(
 }
 
 /**
+ * Find the minimum Euclidean gap between two contours, accounting for diagonal segments.
+ *
+ * This computes the actual minimum Euclidean distance between the contour
+ * boundaries, not just the horizontal distance at Y breakpoints. This is
+ * essential for proper spacing when contours have diagonal edges that
+ * approach each other.
+ *
+ * @param leftContour The left subtree's contour
+ * @param rightContour The right subtree's contour (at its current position)
+ * @returns The minimum Euclidean distance between the contours in the overlap region,
+ *          or null if the contours don't overlap in y
+ */
+export function findMinGap(
+  leftContour: YMonotonePolygon,
+  rightContour: YMonotonePolygon
+): number | null {
+  // Find y-range overlap
+  const leftBounds = getContourBounds(leftContour)
+  const rightBounds = getContourBounds(rightContour)
+
+  const overlapTop = Math.max(leftBounds.top, rightBounds.top)
+  const overlapBottom = Math.min(leftBounds.bottom, rightBounds.bottom)
+
+  if (overlapTop >= overlapBottom) {
+    return null // No y-overlap
+  }
+
+  let minGap = Infinity
+
+  // Get the relevant segments from each contour in the overlap region
+  const leftSegments = getSegmentsInYRange(leftContour.right, overlapTop, overlapBottom)
+  const rightSegments = getSegmentsInYRange(rightContour.left, overlapTop, overlapBottom)
+
+  // For each pair of segments that could potentially be closest, compute min distance
+  for (const leftSeg of leftSegments) {
+    for (const rightSeg of rightSegments) {
+      // Check if segments overlap in Y range
+      const segOverlapTop = Math.max(leftSeg.y1, rightSeg.y1)
+      const segOverlapBottom = Math.min(leftSeg.y2, rightSeg.y2)
+
+      if (segOverlapTop <= segOverlapBottom) {
+        // Segments overlap in Y - compute minimum Euclidean distance
+        const dist = minDistanceBetweenSegments(
+          leftSeg.x1, leftSeg.y1, leftSeg.x2, leftSeg.y2,
+          rightSeg.x1, rightSeg.y1, rightSeg.x2, rightSeg.y2
+        )
+        minGap = Math.min(minGap, dist)
+      }
+    }
+  }
+
+  return isFinite(minGap) ? minGap : null
+}
+
+/**
+ * Extract line segments from a boundary that fall within a Y range.
+ */
+function getSegmentsInYRange(
+  boundary: ContourPoint[],
+  yTop: number,
+  yBottom: number
+): Array<{ x1: number; y1: number; x2: number; y2: number }> {
+  const segments: Array<{ x1: number; y1: number; x2: number; y2: number }> = []
+
+  for (let i = 0; i < boundary.length - 1; i++) {
+    const p1 = boundary[i]
+    const p2 = boundary[i + 1]
+
+    // Check if segment overlaps with the Y range
+    if (p2.y >= yTop && p1.y <= yBottom) {
+      // Clip segment to the Y range if necessary
+      const y1 = Math.max(p1.y, yTop)
+      const y2 = Math.min(p2.y, yBottom)
+
+      // Interpolate X values at clipped Y positions
+      let x1: number, x2: number
+      if (p2.y === p1.y) {
+        // Horizontal segment
+        x1 = p1.x
+        x2 = p2.x
+      } else {
+        const t1 = (y1 - p1.y) / (p2.y - p1.y)
+        const t2 = (y2 - p1.y) / (p2.y - p1.y)
+        x1 = p1.x + t1 * (p2.x - p1.x)
+        x2 = p1.x + t2 * (p2.x - p1.x)
+      }
+
+      segments.push({ x1, y1, x2, y2 })
+    }
+  }
+
+  return segments
+}
+
+// Keep the old function name as an alias for backwards compatibility
+export const findMinHorizontalGap = findMinGap
+
+/**
  * Calculate the horizontal offset needed to place rightContour adjacent to leftContour
- * with a specified gap.
+ * with a specified minimum gap (Euclidean distance).
+ *
+ * Uses the signed horizontal gap to determine the base offset direction, then
+ * iteratively adjusts to ensure the Euclidean gap meets the requirement.
  *
  * @param leftContour The left subtree's contour (positioned)
  * @param rightContour The right subtree's contour (at origin)
- * @param desiredGap The minimum gap to maintain between contours
+ * @param desiredGap The minimum Euclidean gap to maintain between contours
  * @returns The x-offset to apply to rightContour
  */
 export function calculatePlacementOffset(
@@ -809,17 +885,64 @@ export function calculatePlacementOffset(
   rightContour: YMonotonePolygon,
   desiredGap: number
 ): number {
-  const currentGap = findMinHorizontalGap(leftContour, rightContour)
+  const leftBounds = getContourBounds(leftContour)
+  const rightBounds = getContourBounds(rightContour)
 
-  if (currentGap === null) {
-    // No overlap - just place based on bounding boxes
-    const leftBounds = getContourBounds(leftContour)
-    const rightBounds = getContourBounds(rightContour)
+  // Check if there's Y-overlap at all
+  const overlapTop = Math.max(leftBounds.top, rightBounds.top)
+  const overlapBottom = Math.min(leftBounds.bottom, rightBounds.bottom)
+
+  if (overlapTop >= overlapBottom) {
+    // No Y-overlap - just place based on bounding boxes
     return leftBounds.right - rightBounds.left + desiredGap
   }
 
-  // Shift right contour so that minGap becomes desiredGap
-  return desiredGap - currentGap
+  // Initial estimate based on Y-overlapping region only.
+  // Gap calculation is purely geometric - we only consider where contours
+  // actually overlap in Y, not parts at different Y levels.
+  const signedHGap = findSignedHorizontalGap(leftContour, rightContour)
+  const baseOffset = signedHGap !== null ? desiredGap - signedHGap : 0
+
+  // Verify the gap is achieved at base offset
+  const translatedRight = translateContour(rightContour, baseOffset, 0)
+  const actualGap = findMinGap(leftContour, translatedRight)
+
+  if (actualGap !== null && actualGap >= desiredGap - 0.5) {
+    return baseOffset
+  }
+
+  // Binary search for the right offset if base offset isn't sufficient
+  let lowOffset = baseOffset
+  let highOffset = baseOffset + desiredGap * 3 // Wider range for complex cases
+
+  const tolerance = 0.5
+  const maxIterations = 20
+
+  for (let i = 0; i < maxIterations; i++) {
+    const midOffset = (lowOffset + highOffset) / 2
+    const testRight = translateContour(rightContour, midOffset, 0)
+    const testGap = findMinGap(leftContour, testRight)
+
+    if (testGap === null) {
+      // Shouldn't happen if we started with Y-overlap, but handle gracefully
+      highOffset = midOffset
+      continue
+    }
+
+    const diff = testGap - desiredGap
+
+    if (Math.abs(diff) < tolerance) {
+      return midOffset
+    }
+
+    if (diff < 0) {
+      lowOffset = midOffset
+    } else {
+      highOffset = midOffset
+    }
+  }
+
+  return highOffset
 }
 
 /**

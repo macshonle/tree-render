@@ -4,6 +4,7 @@ import { maxwidthLayout } from './algorithms/maxwidth'
 import { topAlignLayout } from './algorithms/topAlign'
 import { lrSqueezeLayout } from './algorithms/lrSqueeze'
 import { rlSqueezeLayout } from './algorithms/rlSqueeze'
+import { tidyLayout } from './algorithms/tidy'
 
 // Re-export types for convenience
 export type {
@@ -24,6 +25,7 @@ const algorithms: Record<LayoutAlgorithmType, LayoutAlgorithm> = {
   'top-align': topAlignLayout,
   'lr-squeeze': lrSqueezeLayout,
   'rl-squeeze': rlSqueezeLayout,
+  'tidy': tidyLayout,
 }
 
 /**
@@ -116,4 +118,5 @@ export const layoutAlgorithmLabels: Record<LayoutAlgorithmType, string> = {
   'top-align': 'Top Align',
   'lr-squeeze': 'LR Squeeze',
   'rl-squeeze': 'RL Squeeze',
+  'tidy': 'Tidy',
 }
