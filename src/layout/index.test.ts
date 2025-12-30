@@ -37,7 +37,7 @@ function createTestStyle(overrides: Partial<TreeStyle['layout']> = {}): TreeStyl
       arrowSize: 8,
     },
     layout: {
-      algorithm: 'maxwidth',
+      algorithm: 'bounding-box',
       horizontalGap: 10,
       verticalGap: 40,
       ...overrides,
@@ -102,25 +102,14 @@ describe('layoutTree integration', () => {
     expect(result.children[0].x).not.toBe(result.children[1].x)
   })
 
-  it('uses maxwidth algorithm by default', () => {
+  it('aligns child tops with bounding-box algorithm', () => {
     const root = node('Parent', [node('Short'), node('Tall\nChild')])
-    const style = createTestStyle({ algorithm: 'maxwidth' })
+    const style = createTestStyle({ algorithm: 'bounding-box' })
     const treeData = createTestTreeData(root)
 
     const result = layoutTree(root, treeData, style, measurer)
 
-    // In maxwidth, children have their centers aligned
-    expect(result.children[0].y).toBe(result.children[1].y)
-  })
-
-  it('uses top-align algorithm when specified', () => {
-    const root = node('Parent', [node('Short'), node('Tall\nChild')])
-    const style = createTestStyle({ algorithm: 'top-align' })
-    const treeData = createTestTreeData(root)
-
-    const result = layoutTree(root, treeData, style, measurer)
-
-    // In top-align, children have their tops aligned
+    // In bounding-box, children have their tops aligned
     const shortTop = result.children[0].y - result.children[0].height / 2
     const tallTop = result.children[1].y - result.children[1].height / 2
     expect(shortTop).toBeCloseTo(tallTop, 5)

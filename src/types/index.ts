@@ -5,7 +5,7 @@ export type NodeShape = 'rectangle' | 'rounded-rectangle' | 'circle' | 'ellipse'
 export type EdgeStyle = 'curve' | 'straight-arrow' | 'org-chart'
 
 // Layout algorithm types
-export type LayoutAlgorithmType = 'maxwidth' | 'top-align' | 'lr-squeeze' | 'rl-squeeze' | 'tidy'
+export type LayoutAlgorithmType = 'bounding-box' | 'tidy'
 
 // Style configuration for the tree
 export interface TreeStyle {
@@ -45,7 +45,7 @@ export const defaultTreeStyle: TreeStyle = {
     arrowSize: 8
   },
   layout: {
-    algorithm: 'maxwidth',
+    algorithm: 'bounding-box',
     horizontalGap: 10,
     verticalGap: 40
   }

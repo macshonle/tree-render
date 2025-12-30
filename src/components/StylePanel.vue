@@ -43,10 +43,7 @@ const edgeStyleOptions: { value: EdgeStyle; label: string; icon: string }[] = [
 
 // Layout algorithm options
 const layoutAlgorithmOptions: { value: LayoutAlgorithmType; label: string }[] = [
-  { value: 'maxwidth', label: 'Centered' },
-  { value: 'top-align', label: 'Top Align' },
-  { value: 'lr-squeeze', label: 'LR Squeeze' },
-  { value: 'rl-squeeze', label: 'RL Squeeze' },
+  { value: 'bounding-box', label: 'Bounding Box' },
   { value: 'tidy', label: 'Tidy' }
 ]
 

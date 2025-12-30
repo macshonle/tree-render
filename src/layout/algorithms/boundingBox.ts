@@ -15,17 +15,21 @@ import {
 } from '../contour'
 
 /**
- * Centered layout algorithm.
+ * Bounding Box layout algorithm.
  *
- * Centers the current node above its children. Children are compacted
- * horizontally so their bounding boxes are exactly horizontalGap apart.
+ * A simple, non-compact layout that spaces subtrees by their bounding boxes.
+ * Children are placed with their bounding boxes exactly horizontalGap apart,
+ * without any interlocking of subtree shapes.
  *
- * Vertical alignment: All sibling ROOT NODES have their CENTERS aligned
- * at the same y-coordinate. This means a taller sibling will extend
- * further down, but all nodes at the same level start at the same vertical
- * center line.
+ * - Children tops are aligned at the same Y level (top-aligned)
+ * - Children are centered as a group under the parent
+ * - Spacing uses bounding boxes, not contours (no compaction)
+ *
+ * This produces clean, predictable layouts. For simple trees, the result
+ * may be identical to Tidy layout. For complex trees with varying subtree
+ * depths, Bounding Box will use more horizontal space than compact layouts.
  */
-export const maxwidthLayout: LayoutAlgorithm = (
+export const boundingBoxLayout: LayoutAlgorithm = (
   node: TreeNode,
   children: LaidOutChild[],
   context
@@ -61,17 +65,11 @@ export const maxwidthLayout: LayoutAlgorithm = (
   const childWidths = children.map((c) => c.layout.bounds.right - c.layout.bounds.left)
   const totalChildrenWidth = calculateChildrenTotalWidth(childWidths, horizontalGap)
 
-  // For center alignment: find the tallest child root node
-  // All children will have their root centers at the same y
-  const maxChildRootHeight = Math.max(...children.map((c) => c.layout.root.height))
-
-  // Position children's centers at this y (relative to parent at origin)
+  // For top alignment: all children have their root tops at the same y
   // Parent bottom is at nodeSize.height / 2
-  // We want the tallest child's top to be verticalGap below parent bottom
-  // tallestChildTop = childCenterY - maxChildRootHeight / 2 = parentBottom + verticalGap
-  // So: childCenterY = parentBottom + verticalGap + maxChildRootHeight / 2
+  // Children tops should be at parentBottom + verticalGap
   const parentBottom = nodeSize.height / 2
-  const childCenterY = parentBottom + verticalGap + maxChildRootHeight / 2
+  const childrenTopY = parentBottom + verticalGap
 
   // Position children starting from left, centered under parent
   let currentX = -totalChildrenWidth / 2
@@ -88,9 +86,12 @@ export const maxwidthLayout: LayoutAlgorithm = (
     // Place so child's left bound aligns with currentX
     const childOffsetX = currentX - childBounds.left
 
-    // Center alignment: position child root center at childCenterY
-    // Child root is at y=0 in its own coordinate system
-    const childOffsetY = childCenterY
+    // Top alignment: position child root top at childrenTopY
+    // Child root is at y=0, so its top is at -height/2
+    // We want: childRootTop + childOffsetY = childrenTopY
+    // So: -height/2 + childOffsetY = childrenTopY
+    // childOffsetY = childrenTopY + height/2
+    const childOffsetY = childrenTopY + childLayout.root.height / 2
 
     // Clone and translate the child's layout
     const translatedChild = structuredClone(childLayout.root)
