@@ -1351,9 +1351,6 @@ describe('buildSubtreeContour - deep subtree preservation', () => {
       'org-chart'
     )
 
-    // Log Group G's contour to understand its structure
-    console.log('Group G right boundary:', groupGContour.right.map((p) => `(${p.x.toFixed(1)}, ${p.y.toFixed(1)})`).join(' → '))
-
     // Verify Group G's own contour extends to its children
     const groupGBounds = getContourBounds(groupGContour)
     expect(groupGBounds.bottom).toBe(65) // children at y=50, half-height 15
@@ -1370,15 +1367,6 @@ describe('buildSubtreeContour - deep subtree preservation', () => {
     )
 
     const categoryCBounds = getContourBounds(categoryCContour)
-
-    // Log Category C's right boundary to check for decoherence
-    console.log('Category C right boundary:', categoryCContour.right.map((p) => `(${p.x.toFixed(1)}, ${p.y.toFixed(1)})`).join(' → '))
-
-    // Check for inward dips on the right boundary below Group G's node bottom
-    // Group G is at y=50 with height 30, so its bottom is at y=65
-    const groupGBottom = 50 + 30 / 2
-    const pointsBelowGroupG = categoryCContour.right.filter((p) => p.y > groupGBottom)
-    console.log('Points below Group G bottom:', pointsBelowGroupG.map((p) => `(${p.x.toFixed(1)}, ${p.y.toFixed(1)})`).join(' → '))
 
     // Category C's contour should extend to Group G's children (N, O)
     // Group G is at y=50, its children extend to 50+65=115 in Category C's coords

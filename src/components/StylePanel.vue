@@ -16,10 +16,12 @@ import {
 } from '@mdi/js'
 import { useTreeStyle } from '@/composables/useTreeStyle'
 import { useDebugMode } from '@/composables/useDebugMode'
+import { useCanvasView } from '@/composables/useCanvasView'
 import type { NodeShape, EdgeStyle, LayoutAlgorithmType } from '@/types'
 
 const { treeStyle, resetStyle } = useTreeStyle()
 const { debugMode, setDebugMode } = useDebugMode()
+const { resetView } = useCanvasView()
 
 const debugEnabled = computed({
   get: () => debugMode.value,
@@ -272,7 +274,7 @@ const nodePadding = computed({
       variant="outlined"
       size="small"
       block
-      @click="resetStyle"
+      @click="resetStyle(); resetView()"
     >
       <v-icon start :icon="mdiRefresh" />
       Reset to Defaults

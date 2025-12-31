@@ -4,6 +4,7 @@ import { mdiPlus, mdiMinus } from '@mdi/js'
 import type { TreeStyle, TreeExample, LayoutNode, YMonotonePolygon, ContourPoint } from '@/types'
 import { layoutTree, createCanvasTextMeasurer } from '@/layout'
 import { useDebugMode } from '@/composables/useDebugMode'
+import { useCanvasView } from '@/composables/useCanvasView'
 
 const props = defineProps<{
   styleConfig: TreeStyle
@@ -11,13 +12,23 @@ const props = defineProps<{
 }>()
 
 const { debugMode, selection, selectNode, selectEdge, clearSelection } = useDebugMode()
+const {
+  zoom,
+  applyPanDelta,
+  setZoom,
+  setPanOffset,
+  resetView: resetCanvasView,
+  setCurrentExample,
+  markUserInteraction,
+  getPanOffset,
+  getZoom,
+  hasUserInteracted,
+} = useCanvasView()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 
-// Pan and zoom state
-const panOffset = ref({ x: 0, y: 0 })
-const zoom = ref(1)
+// Local panning state (not shared)
 const isPanning = ref(false)
 const lastMousePos = ref({ x: 0, y: 0 })
 const mouseDownPos = ref({ x: 0, y: 0 })
@@ -32,10 +43,50 @@ const hoverTarget = ref<HoverTarget>(null)
 // Store the current layout for hit testing
 let currentLayoutRoot: LayoutNode | null = null
 let currentOffsetX = 0
-let currentOffsetY = 50
+let currentOffsetY = 0
+
+// Store previous root screen position to preserve it when algorithm changes
+let previousRootScreenX: number | null = null
+let previousRootScreenY: number | null = null
+
+// Track layout algorithm to detect algorithm-only changes
+let previousLayoutAlgorithm: string | null = null
+
+// Flag to indicate we're in a pan/zoom operation (don't adjust position)
+let isInteracting = false
 
 // Edge hit detection threshold (in canvas pixels before zoom)
 const EDGE_HIT_THRESHOLD = 10
+
+// Predefined zoom levels to avoid floating point drift
+// Button zoom steps through these exact values
+const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+
+/**
+ * Find the next zoom level up from current zoom.
+ * Returns the current zoom clamped to max if already at or above max.
+ */
+function getNextZoomUp(current: number): number {
+  for (const level of ZOOM_LEVELS) {
+    if (level > current + 0.001) { // Small epsilon for floating point comparison
+      return level
+    }
+  }
+  return ZOOM_LEVELS[ZOOM_LEVELS.length - 1]
+}
+
+/**
+ * Find the next zoom level down from current zoom.
+ * Returns the current zoom clamped to min if already at or below min.
+ */
+function getNextZoomDown(current: number): number {
+  for (let i = ZOOM_LEVELS.length - 1; i >= 0; i--) {
+    if (ZOOM_LEVELS[i] < current - 0.001) { // Small epsilon for floating point comparison
+      return ZOOM_LEVELS[i]
+    }
+  }
+  return ZOOM_LEVELS[0]
+}
 
 function resizeCanvas() {
   if (containerRef.value && canvasRef.value) {
@@ -83,29 +134,71 @@ function draw() {
   const textMeasurer = createCanvasTextMeasurer(ctx)
   const layoutRoot = layoutTree(props.treeData.root, props.treeData, props.styleConfig, textMeasurer)
 
-  // Calculate tree bounds for centering
-  let minX = Infinity, maxX = -Infinity, maxY = -Infinity
+  // Calculate tree bounds (for positioning)
+  let minX = Infinity
   function calcBounds(node: LayoutNode) {
     minX = Math.min(minX, node.x - node.width / 2)
-    maxX = Math.max(maxX, node.x + node.width / 2)
-    maxY = Math.max(maxY, node.y + node.height)
     node.children.forEach(calcBounds)
   }
   calcBounds(layoutRoot)
 
-  const treeWidth = maxX - minX
-  const offsetX = -minX - treeWidth / 2
-  const offsetY = 50
+  // Get gap values from style config
+  // horizontalGap (Min Gap) is used for canvas margins (both left and top)
+  // verticalGap (Line Spacing) is used for spacing between tree levels
+  const { horizontalGap } = props.styleConfig.layout
+
+  // Calculate root's bounding box top
+  const rootTop = layoutRoot.y - layoutRoot.height / 2
+
+  // offsetX: shifts tree so that left boundary is at x=0 in tree space
+  // offsetY: shifts tree so that root top is at y=0 in tree space
+  const offsetX = -minX
+  const offsetY = -rootTop
 
   // Store for hit testing
   currentLayoutRoot = layoutRoot
   currentOffsetX = offsetX
   currentOffsetY = offsetY
 
+  // Get current view state
+  const panOffset = getPanOffset()
+  const zoom = getZoom()
+  const currentAlgorithm = props.styleConfig.layout.algorithm
+
+  // Preserve root position when switching layout algorithms (but not during pan/zoom)
+  // Only adjust if:
+  // 1. User has previously panned/zoomed in this example
+  // 2. We're not currently in a pan/zoom operation
+  // 3. The algorithm changed (layout recalculated)
+  // 4. We have a previous root position to preserve
+  const algorithmChanged = previousLayoutAlgorithm !== null && previousLayoutAlgorithm !== currentAlgorithm
+  if (hasUserInteracted() && !isInteracting && algorithmChanged &&
+      previousRootScreenX !== null && previousRootScreenY !== null) {
+    // Calculate where root would appear with current pan
+    const newRootScreenX = horizontalGap + panOffset.x + (layoutRoot.x + offsetX) * zoom
+    const newRootScreenY = horizontalGap + panOffset.y + (layoutRoot.y + offsetY) * zoom
+
+    // Adjust pan to keep root at previous screen position
+    const panAdjustX = previousRootScreenX - newRootScreenX
+    const panAdjustY = previousRootScreenY - newRootScreenY
+
+    if (Math.abs(panAdjustX) > 0.5 || Math.abs(panAdjustY) > 0.5) {
+      setPanOffset(panOffset.x + panAdjustX, panOffset.y + panAdjustY)
+    }
+  }
+
+  // Update tracking state for next redraw
+  previousLayoutAlgorithm = currentAlgorithm
+  previousRootScreenX = horizontalGap + panOffset.x + (layoutRoot.x + offsetX) * zoom
+  previousRootScreenY = horizontalGap + panOffset.y + (layoutRoot.y + offsetY) * zoom
+
   // Apply transformations
+  // Position tree at top-left with gaps:
+  // - Tree left boundary at horizontalGap from canvas left edge
+  // - Root top at horizontalGap from canvas top edge (same margin for both)
   ctx.save()
-  ctx.translate(canvas.width / 2 + panOffset.value.x, offsetY + panOffset.value.y)
-  ctx.scale(zoom.value, zoom.value)
+  ctx.translate(horizontalGap + panOffset.x, horizontalGap + panOffset.y)
+  ctx.scale(zoom, zoom)
 
   // Calculate shape-specific vertical offset for edge attachment points
   // Accounts for shape extensions beyond bounding box + stroke width
@@ -139,14 +232,14 @@ function draw() {
     if (node.children.length > 0) {
       const parentOffset = getShapeVerticalOffset(node.width, node.height)
       const parentX = node.x + offsetX
-      const parentBottom = node.y + node.height / 2 + parentOffset
+      const parentBottom = node.y + offsetY + node.height / 2 + parentOffset
 
       // Calculate child endpoints
       const childEndpoints = node.children.map(child => {
         const childOffset = getShapeVerticalOffset(child.width, child.height)
         return {
           x: child.x + offsetX,
-          y: child.y - child.height / 2 - childOffset
+          y: child.y + offsetY - child.height / 2 - childOffset
         }
       })
 
@@ -232,19 +325,19 @@ function draw() {
       const halfW = node.width / 2 + 4
       const halfH = node.height / 2 + 4
       ctx!.beginPath()
-      ctx!.roundRect(node.x + offsetX - halfW, node.y - halfH, halfW * 2, halfH * 2, 6)
+      ctx!.roundRect(node.x + offsetX - halfW, node.y + offsetY - halfH, halfW * 2, halfH * 2, 6)
       ctx!.fill()
       ctx!.stroke()
       ctx!.restore()
     }
 
-    drawNode(ctx!, node.x + offsetX, node.y, node.label, nodeStyle, node.width, node.height)
+    drawNode(ctx!, node.x + offsetX, node.y + offsetY, node.label, nodeStyle, node.width, node.height)
   }
   drawSubtree(layoutRoot)
 
   // Draw contours if debug mode is enabled and something is selected
   if (debugMode.value && selection.value) {
-    drawDebugContours(ctx!, layoutRoot, offsetX, selection.value)
+    drawDebugContours(ctx!, layoutRoot, offsetX, offsetY, selection.value)
   }
 
   ctx.restore()
@@ -257,14 +350,15 @@ function drawDebugContours(
   ctx: CanvasRenderingContext2D,
   root: LayoutNode,
   offsetX: number,
+  offsetY: number,
   sel: { type: 'node'; nodeId: string } | { type: 'edge'; parentId: string; childId: string; childIndex: number }
 ) {
   if (sel.type === 'node') {
     // Find the node and draw its contour
     const node = findNodeById(root, sel.nodeId)
     if (node?.polygonContour) {
-      drawPolygonContour(ctx, node.polygonContour, node.x + offsetX, node.y, 'left', 'rgba(0, 180, 0, 0.9)')
-      drawPolygonContour(ctx, node.polygonContour, node.x + offsetX, node.y, 'right', 'rgba(220, 0, 0, 0.9)')
+      drawPolygonContour(ctx, node.polygonContour, node.x + offsetX, node.y + offsetY, 'left', 'rgba(0, 180, 0, 0.9)')
+      drawPolygonContour(ctx, node.polygonContour, node.x + offsetX, node.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
     }
   } else {
     // Find the parent node
@@ -282,13 +376,13 @@ function drawDebugContours(
     if (childIndex > 0) {
       const leftChild = children[childIndex - 1]
       if (leftChild?.polygonContour) {
-        drawPolygonContour(ctx, leftChild.polygonContour, leftChild.x + offsetX, leftChild.y, 'right', 'rgba(220, 0, 0, 0.9)')
+        drawPolygonContour(ctx, leftChild.polygonContour, leftChild.x + offsetX, leftChild.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
       }
     } else if (childIndex === 0) {
       // No immediate left sibling - find ancestor's left sibling
       const ancestorLeftSibling = findAncestorLeftSibling(root, sel.parentId)
       if (ancestorLeftSibling?.polygonContour) {
-        drawPolygonContour(ctx, ancestorLeftSibling.polygonContour, ancestorLeftSibling.x + offsetX, ancestorLeftSibling.y, 'right', 'rgba(220, 0, 0, 0.9)')
+        drawPolygonContour(ctx, ancestorLeftSibling.polygonContour, ancestorLeftSibling.x + offsetX, ancestorLeftSibling.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
       }
     }
 
@@ -296,7 +390,7 @@ function drawDebugContours(
     if (childIndex < children.length) {
       const rightChild = children[childIndex]
       if (rightChild?.polygonContour) {
-        drawPolygonContour(ctx, rightChild.polygonContour, rightChild.x + offsetX, rightChild.y, 'left', 'rgba(0, 180, 0, 0.9)')
+        drawPolygonContour(ctx, rightChild.polygonContour, rightChild.x + offsetX, rightChild.y + offsetY, 'left', 'rgba(0, 180, 0, 0.9)')
       }
     }
   }
@@ -638,10 +732,10 @@ function handleMouseDown(e: MouseEvent) {
 
 function handleMouseMove(e: MouseEvent) {
   if (isPanning.value) {
+    isInteracting = true
     const dx = e.clientX - lastMousePos.value.x
     const dy = e.clientY - lastMousePos.value.y
-    panOffset.value.x += dx
-    panOffset.value.y += dy
+    applyPanDelta(dx, dy)
     lastMousePos.value = { x: e.clientX, y: e.clientY }
     draw()
   } else if (debugMode.value) {
@@ -660,13 +754,18 @@ function handleMouseUp(e: MouseEvent) {
     if (distance < 5 && debugMode.value) {
       // This was a click - do hit testing
       handleClick(e)
+    } else if (distance >= 5) {
+      // User actually dragged - mark as interacted
+      markUserInteraction()
     }
   }
   isPanning.value = false
+  isInteracting = false
 }
 
 function handleMouseLeave() {
   isPanning.value = false
+  isInteracting = false
   if (hoverTarget.value) {
     hoverTarget.value = null
     draw()
@@ -728,11 +827,18 @@ function screenToTreeCoords(e: MouseEvent): { treeX: number; treeY: number } {
   const canvas = canvasRef.value!
   const rect = canvas.getBoundingClientRect()
 
+  // horizontalGap is used for both left and top canvas margins
+  const { horizontalGap } = props.styleConfig.layout
+  const panOffset = getPanOffset()
+  const zoom = getZoom()
+
   const canvasX = (e.clientX - rect.left) * (canvas.width / rect.width)
   const canvasY = (e.clientY - rect.top) * (canvas.height / rect.height)
 
-  const treeX = (canvasX - canvas.width / 2 - panOffset.value.x) / zoom.value - currentOffsetX
-  const treeY = (canvasY - currentOffsetY - panOffset.value.y) / zoom.value
+  // Reverse the transformation: canvas coords -> tree coords
+  // Forward transform was: ctx.translate(horizontalGap + panOffset.x, horizontalGap + panOffset.y) then scale
+  const treeX = (canvasX - horizontalGap - panOffset.x) / zoom - currentOffsetX
+  const treeY = (canvasY - horizontalGap - panOffset.y) / zoom - currentOffsetY
 
   return { treeX, treeY }
 }
@@ -919,27 +1025,168 @@ function distanceToBezier(
   return minDist
 }
 
+/**
+ * Zoom toward a specific point on the canvas.
+ * The point (focalX, focalY) in canvas coordinates stays fixed on screen.
+ * If zoom is clamped at min/max, pan is not adjusted to prevent content flying away.
+ */
+function zoomToPoint(focalCanvasX: number, focalCanvasY: number, zoomFactor: number) {
+  const { horizontalGap } = props.styleConfig.layout
+  const panOffset = getPanOffset()
+  const oldZoom = getZoom()
+  const rawNewZoom = oldZoom * zoomFactor
+
+  // Clamp zoom to valid range (same logic as setZoom)
+  const MIN_ZOOM = 0.25
+  const MAX_ZOOM = 4.0
+  const clampedNewZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, rawNewZoom))
+
+  // If zoom didn't actually change (clamped at limit), don't adjust anything
+  if (Math.abs(clampedNewZoom - oldZoom) < 0.001) {
+    return
+  }
+
+  // Calculate actual zoom factor after clamping
+  const actualZoomFactor = clampedNewZoom / oldZoom
+
+  // Distance from the transformation origin to the focal point
+  const dx = focalCanvasX - horizontalGap - panOffset.x
+  const dy = focalCanvasY - horizontalGap - panOffset.y
+
+  // Adjust pan so the focal point stays at the same screen position
+  // Formula: newPan = oldPan + distance * (1 - actualZoomFactor)
+  const newPanX = panOffset.x + dx * (1 - actualZoomFactor)
+  const newPanY = panOffset.y + dy * (1 - actualZoomFactor)
+
+  isInteracting = true
+  setZoom(clampedNewZoom)
+  setPanOffset(newPanX, newPanY)
+  markUserInteraction()
+  isInteracting = false
+  draw()
+}
+
 function handleWheel(e: WheelEvent) {
   e.preventDefault()
-  const delta = e.deltaY > 0 ? 0.9 : 1.1
-  zoom.value = Math.max(0.25, Math.min(4, zoom.value * delta))
-  draw()
+  const canvas = canvasRef.value
+  if (!canvas) return
+
+  const rect = canvas.getBoundingClientRect()
+  const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
+
+  // Get cursor position in canvas coordinates (accounting for CSS scaling)
+  const canvasX = (e.clientX - rect.left) * (canvas.width / rect.width)
+  const canvasY = (e.clientY - rect.top) * (canvas.height / rect.height)
+
+  zoomToPoint(canvasX, canvasY, zoomFactor)
+}
+
+/**
+ * Get the tree's bounding box center in canvas coordinates.
+ * Returns null if no tree is loaded.
+ */
+function getTreeCenterInCanvasCoords(): { x: number; y: number } | null {
+  if (!currentLayoutRoot) return null
+
+  // Calculate tree bounding box
+  let minX = Infinity, maxX = -Infinity
+  let minY = Infinity, maxY = -Infinity
+
+  function calcBounds(node: LayoutNode) {
+    const halfW = node.width / 2
+    const halfH = node.height / 2
+    minX = Math.min(minX, node.x - halfW)
+    maxX = Math.max(maxX, node.x + halfW)
+    minY = Math.min(minY, node.y - halfH)
+    maxY = Math.max(maxY, node.y + halfH)
+    node.children.forEach(calcBounds)
+  }
+  calcBounds(currentLayoutRoot)
+
+  // Tree center in tree coordinates (before offset)
+  const treeCenterX = (minX + maxX) / 2
+  const treeCenterY = (minY + maxY) / 2
+
+  // Convert to canvas coordinates
+  const { horizontalGap } = props.styleConfig.layout
+  const panOffset = getPanOffset()
+  const zoom = getZoom()
+
+  return {
+    x: horizontalGap + panOffset.x + (treeCenterX + currentOffsetX) * zoom,
+    y: horizontalGap + panOffset.y + (treeCenterY + currentOffsetY) * zoom,
+  }
+}
+
+/**
+ * Button zoom: step to next predefined zoom level, keeping tree center fixed.
+ * Using exact values like 25%, 50%, 100%, etc. avoids floating point drift.
+ * Zooming toward tree center keeps the content visually stable.
+ */
+function zoomIn() {
+  const currentZoom = getZoom()
+  const nextZoom = getNextZoomUp(currentZoom)
+  if (nextZoom === currentZoom) return
+
+  const focalPoint = getTreeCenterInCanvasCoords()
+  if (focalPoint) {
+    zoomToPoint(focalPoint.x, focalPoint.y, nextZoom / currentZoom)
+  } else {
+    // No tree loaded, just change zoom
+    isInteracting = true
+    setZoom(nextZoom)
+    markUserInteraction()
+    isInteracting = false
+    draw()
+  }
+}
+
+function zoomOut() {
+  const currentZoom = getZoom()
+  const nextZoom = getNextZoomDown(currentZoom)
+  if (nextZoom === currentZoom) return
+
+  const focalPoint = getTreeCenterInCanvasCoords()
+  if (focalPoint) {
+    zoomToPoint(focalPoint.x, focalPoint.y, nextZoom / currentZoom)
+  } else {
+    // No tree loaded, just change zoom
+    isInteracting = true
+    setZoom(nextZoom)
+    markUserInteraction()
+    isInteracting = false
+    draw()
+  }
 }
 
 function resetView() {
-  panOffset.value = { x: 0, y: 0 }
-  zoom.value = 1
+  resetCanvasView()
+  // Reset tracking variables so next draw uses default positioning
+  previousRootScreenX = null
+  previousRootScreenY = null
+  previousLayoutAlgorithm = null
   draw()
 }
 
-// Watch for style, tree data, and debug state changes and redraw
+// Watch for style changes and redraw
 watch(() => props.styleConfig, draw, { deep: true })
-watch(() => props.treeData, () => {
+
+// Watch for tree data changes (example switching)
+// immediate: true ensures the first example's ID is set on mount
+watch(() => props.treeData, (newData) => {
   // Clear selection when switching examples (even if node IDs match, it's a different tree)
   clearSelection()
   hoverTarget.value = null
+  // Set the current example ID so view state is loaded/stored for this example
+  if (newData?.id) {
+    setCurrentExample(newData.id)
+  }
+  // Reset tracking variables - each example has its own view state
+  previousRootScreenX = null
+  previousRootScreenY = null
+  previousLayoutAlgorithm = null
   draw()
-}, { deep: true })
+}, { deep: true, immediate: true })
 watch(() => debugMode.value, draw)
 watch(() => selection.value, draw, { deep: true })
 
@@ -992,13 +1239,13 @@ onUnmounted(() => {
     <!-- Zoom controls overlay -->
     <div class="zoom-controls">
       <v-btn-group density="compact" variant="outlined">
-        <v-btn size="small" @click="zoom = Math.min(4, zoom * 1.2); draw()">
+        <v-btn size="small" @click="zoomIn">
           <v-icon :icon="mdiPlus" />
         </v-btn>
         <v-btn size="small" @click="resetView">
           <span class="text-caption">{{ Math.round(zoom * 100) }}%</span>
         </v-btn>
-        <v-btn size="small" @click="zoom = Math.max(0.25, zoom * 0.8); draw()">
+        <v-btn size="small" @click="zoomOut">
           <v-icon :icon="mdiMinus" />
         </v-btn>
       </v-btn-group>
