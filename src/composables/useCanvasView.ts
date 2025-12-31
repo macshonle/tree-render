@@ -59,15 +59,15 @@ export function useCanvasView() {
   // Computed refs that read from per-example state
   // Include stateVersion.value to ensure reactivity when state changes
   const panOffset = computed(() => {
-    stateVersion.value // dependency for reactivity
+    void stateVersion.value // dependency for reactivity
     return getCurrentViewState().panOffset
   })
   const zoom = computed(() => {
-    stateVersion.value // dependency for reactivity
+    void stateVersion.value // dependency for reactivity
     return getCurrentViewState().zoom
   })
   const userHasInteracted = computed(() => {
-    stateVersion.value // dependency for reactivity
+    void stateVersion.value // dependency for reactivity
     return getCurrentViewState().userHasInteracted
   })
 
