@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, provide, inject, type InjectionKey, type ComputedRef } from 'vue'
 
 /**
  * Selection types for debug visualization
@@ -20,16 +20,19 @@ export interface EdgeSelection {
 
 export type Selection = NodeSelection | EdgeSelection
 
-/**
- * Global debug mode state
- */
-const debugMode = ref(true)
-const selection = ref<Selection | null>(null)
+export interface DebugModeStore {
+  debugMode: ComputedRef<boolean>
+  selection: ComputedRef<Selection | null>
+  setDebugMode: (enabled: boolean) => void
+  toggleDebugMode: () => void
+  selectNode: (nodeId: string) => void
+  selectEdge: (parentId: string, childId: string, childIndex: number) => void
+  clearSelection: () => void
+}
 
-/**
- * Composable for debug mode and selection state
- */
-export function useDebugMode() {
+export function createDebugModeStore(initialEnabled = true): DebugModeStore {
+  const debugMode = ref(initialEnabled)
+  const selection = ref<Selection | null>(null)
   const isDebugMode = computed(() => debugMode.value)
 
   function setDebugMode(enabled: boolean) {
@@ -83,4 +86,18 @@ export function useDebugMode() {
     selectEdge,
     clearSelection,
   }
+}
+
+const debugModeKey: InjectionKey<DebugModeStore> = Symbol('DebugModeStore')
+
+export function provideDebugMode(store: DebugModeStore) {
+  provide(debugModeKey, store)
+}
+
+export function useDebugMode(): DebugModeStore {
+  const store = inject(debugModeKey)
+  if (!store) {
+    throw new Error('DebugModeStore is not provided')
+  }
+  return store
 }

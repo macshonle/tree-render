@@ -26,6 +26,7 @@ export interface TreeStyle {
     algorithm: LayoutAlgorithmType
     horizontalGap: number
     verticalGap: number
+    reduceLeafSiblingGaps: boolean
   }
 }
 
@@ -47,7 +48,8 @@ export const defaultTreeStyle: TreeStyle = {
   layout: {
     algorithm: 'bounding-box',
     horizontalGap: 10,
-    verticalGap: 40
+    verticalGap: 40,
+    reduceLeafSiblingGaps: false
   }
 }
 

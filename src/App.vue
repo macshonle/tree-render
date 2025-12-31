@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import {
   mdiWeatherSunny,
@@ -10,12 +10,25 @@ import {
 } from '@mdi/js'
 import StylePanel from './components/StylePanel.vue'
 import TreeViewCanvas from './components/TreeViewCanvas.vue'
-import { useTreeStyle } from './composables/useTreeStyle'
+import { createTreeStyleStore, provideTreeStyle } from './composables/useTreeStyle'
+import { createDebugModeStore, provideDebugMode } from './composables/useDebugMode'
+import { createCanvasViewStore, provideCanvasView } from './composables/useCanvasView'
 import { useTreeExamples } from './composables/useTreeExamples'
 
 const theme = useTheme()
-const { treeStyle, downloadStyle, loadStyleFromFile } = useTreeStyle()
-const { examples, selectedExample, selectExample } = useTreeExamples()
+
+const treeStyleStore = createTreeStyleStore()
+provideTreeStyle(treeStyleStore)
+const { treeStyle, downloadStyle, loadStyleFromFile, applyExampleStyle } = treeStyleStore
+
+provideDebugMode(createDebugModeStore())
+provideCanvasView(createCanvasViewStore())
+
+const { examples, findExampleById } = useTreeExamples()
+const selectedExampleId = ref(examples.value[0]?.id ?? '')
+const selectedExample = computed(() =>
+  selectedExampleId.value ? findExampleById(selectedExampleId.value) : null
+)
 
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -35,9 +48,9 @@ const themeIcon = computed(() => {
 function applyTheme() {
   if (themeMode.value === 'system') {
     const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    theme.change(isDark ? 'dark' : 'light')
+    theme.global.name.value = isDark ? 'dark' : 'light'
   } else {
-    theme.change(themeMode.value)
+    theme.global.name.value = themeMode.value
   }
 }
 
@@ -56,6 +69,10 @@ function handleSystemThemeChange() {
   }
 }
 
+watch(selectedExample, (example) => {
+  applyExampleStyle(example?.style)
+}, { immediate: true })
+
 onMounted(() => {
   applyTheme()
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', handleSystemThemeChange)
@@ -67,6 +84,13 @@ onUnmounted(() => {
 
 function handleImport() {
   fileInput.value?.click()
+}
+
+function selectExample(id: string | null) {
+  if (!id) return
+  if (findExampleById(id)) {
+    selectedExampleId.value = id
+  }
 }
 
 async function handleFileSelect(event: Event) {

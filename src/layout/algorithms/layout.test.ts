@@ -44,6 +44,7 @@ function createMockContext(overrides: Partial<LayoutContext> = {}): LayoutContex
       algorithm: 'bounding-box',
       horizontalGap: 10,
       verticalGap: 40,
+      reduceLeafSiblingGaps: false,
     },
     padding: 10,
     edgeStyle: 'org-chart',
@@ -180,7 +181,7 @@ describe('boundingBoxLayout', () => {
 
     it('respects vertical gap setting', () => {
       const context = createMockContext({
-        layout: { algorithm: 'bounding-box', horizontalGap: 10, verticalGap: 100 },
+        layout: { algorithm: 'bounding-box', horizontalGap: 10, verticalGap: 100, reduceLeafSiblingGaps: false },
       })
       const parent = node('Parent')
       const child = node('Child')
@@ -196,7 +197,7 @@ describe('boundingBoxLayout', () => {
 
     it('respects horizontal gap setting', () => {
       const context = createMockContext({
-        layout: { algorithm: 'bounding-box', horizontalGap: 50, verticalGap: 40 },
+        layout: { algorithm: 'bounding-box', horizontalGap: 50, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
       const parent = node('Parent')
       const child1 = node('A')
@@ -210,6 +211,24 @@ describe('boundingBoxLayout', () => {
         result.root.children[1].width / 2 -
         (result.root.children[0].x + result.root.children[0].width / 2)
       expect(gap).toBeCloseTo(50, 0)
+    })
+
+    it('reduces gap for leaf siblings when enabled', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'bounding-box', horizontalGap: 40, verticalGap: 40, reduceLeafSiblingGaps: true },
+      })
+      const parent = node('Parent')
+      const child1 = node('A')
+      const child2 = node('B')
+      const laidOutChildren = layoutChildren([child1, child2], context, boundingBoxLayout)
+
+      const result = boundingBoxLayout(parent, laidOutChildren, context)
+
+      const gap =
+        result.root.children[1].x -
+        result.root.children[1].width / 2 -
+        (result.root.children[0].x + result.root.children[0].width / 2)
+      expect(gap).toBeCloseTo(20, 0)
     })
   })
 
@@ -487,7 +506,7 @@ describe('tidyLayout', () => {
 
     it('respects vertical gap setting', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 100 },
+        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 100, reduceLeafSiblingGaps: false },
       })
       const parent = node('Parent')
       const child = node('Child')
@@ -502,7 +521,7 @@ describe('tidyLayout', () => {
 
     it('respects horizontal gap setting', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 50, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 50, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
       const parent = node('Parent')
       const child1 = node('A')
@@ -517,6 +536,24 @@ describe('tidyLayout', () => {
         result.root.children[1].width / 2 -
         (result.root.children[0].x + result.root.children[0].width / 2)
       expect(gap).toBeGreaterThanOrEqual(50 - 1) // Allow small floating point tolerance
+    })
+
+    it('reduces gap for leaf siblings when enabled', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'tidy', horizontalGap: 40, verticalGap: 40, reduceLeafSiblingGaps: true },
+      })
+      const parent = node('Parent')
+      const child1 = node('A')
+      const child2 = node('B')
+      const laidOutChildren = layoutChildren([child1, child2], context, tidyLayout)
+
+      const result = tidyLayout(parent, laidOutChildren, context)
+
+      const gap =
+        result.root.children[1].x -
+        result.root.children[1].width / 2 -
+        (result.root.children[0].x + result.root.children[0].width / 2)
+      expect(gap).toBeCloseTo(20, 1)
     })
   })
 
@@ -605,7 +642,7 @@ describe('tidyLayout', () => {
   describe('apportionment (even gap distribution)', () => {
     it('distributes gaps evenly when deep subtree causes shift', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       // Create tree where first child has deep right-extending subtree
@@ -648,7 +685,7 @@ describe('tidyLayout', () => {
 
     it('maintains minimum gap even with apportionment', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 20, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 20, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       const tree = node('Root', [
@@ -671,7 +708,7 @@ describe('tidyLayout', () => {
 
     it('produces reasonably even gaps for asymmetric trees', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       // Asymmetric tree: first child has deep subtree
@@ -710,7 +747,7 @@ describe('tidyLayout', () => {
   describe('contour-based compaction', () => {
     it('uses contour-based spacing for subtrees with different shapes', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       const leftSubtree = node('L', [node('LL')])
@@ -726,7 +763,7 @@ describe('tidyLayout', () => {
 
     it('compacts multiple children correctly', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       const children = [
@@ -959,7 +996,7 @@ describe('error-prone edge cases', () => {
 
     it('handles very wide tree (20 children)', () => {
       const context = createMockContext({
-        layout: { algorithm: 'bounding-box', horizontalGap: 5, verticalGap: 20 },
+        layout: { algorithm: 'bounding-box', horizontalGap: 5, verticalGap: 20, reduceLeafSiblingGaps: false },
       })
 
       const children = Array.from({ length: 20 }, (_, i) => node(`N${i}`))
@@ -988,7 +1025,7 @@ describe('error-prone edge cases', () => {
 
     it('handles zero horizontal gap', () => {
       const context = createMockContext({
-        layout: { algorithm: 'bounding-box', horizontalGap: 0, verticalGap: 20 },
+        layout: { algorithm: 'bounding-box', horizontalGap: 0, verticalGap: 20, reduceLeafSiblingGaps: false },
       })
 
       const tree = node('Root', [node('A'), node('B'), node('C')])
@@ -1103,7 +1140,7 @@ describe('error-prone edge cases', () => {
   describe('bounding-box vs tidy equivalence for simple trees', () => {
     it('produces same layout for symmetric tree with uniform nodes', () => {
       const context = createMockContext({
-        layout: { algorithm: 'bounding-box', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'bounding-box', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       // Symmetric tree with uniform nodes
@@ -1124,7 +1161,7 @@ describe('error-prone edge cases', () => {
 
     it('tidy can produce more compact layout than bounding-box for interlocking subtrees', () => {
       const context = createMockContext({
-        layout: { algorithm: 'bounding-box', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'bounding-box', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       // Tree where left subtree extends right, and right subtree is short
@@ -1150,7 +1187,7 @@ describe('error-prone edge cases', () => {
   describe('contour edge cases', () => {
     it('handles deep left-leaning subtree next to shallow right subtree', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       // Deep subtree on left, shallow on right
@@ -1171,7 +1208,7 @@ describe('error-prone edge cases', () => {
 
     it('handles deep right-leaning subtree next to shallow left subtree', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       // Shallow subtree on left, deep on right
@@ -1191,7 +1228,7 @@ describe('error-prone edge cases', () => {
 
     it('handles multiple deep subtrees with varying depths', () => {
       const context = createMockContext({
-        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40 },
+        layout: { algorithm: 'tidy', horizontalGap: 10, verticalGap: 40, reduceLeafSiblingGaps: false },
       })
 
       // Mix of deep and shallow subtrees

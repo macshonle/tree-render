@@ -29,10 +29,13 @@ tree-render/
 │   │   ├── StylePanel.vue   # Side panel with style controls
 │   │   └── TreeViewCanvas.vue # Canvas for tree visualization
 │   ├── composables/         # Shared reactive state & logic
-│   │   ├── useTreeStyle.ts  # Tree style state management
+│   │   ├── useTreeStyle.ts  # Tree style store + provide/inject
+│   │   ├── useCanvasView.ts # Per-example pan/zoom state
+│   │   ├── useDebugMode.ts  # Debug selection state
 │   │   └── useTreeExamples.ts # Tree example loading
 │   ├── data/
 │   │   └── examples/        # Tree example definitions (.tree.yaml)
+│   ├── layout/              # Layout algorithms + contour helpers
 │   ├── types/               # TypeScript type definitions
 │   │   └── index.ts
 │   └── styles/              # Global styles
@@ -76,9 +79,10 @@ Vue uses `.vue` files that combine template, script, and styles in one file.
 - Handles file import/export
 
 **StylePanel.vue** contains:
-- Collapsible sections for node, edge, and layout styles
+- A single compact panel grouping node, edge, and layout styles
 - Button toggles for shape/style selection
 - Sliders for numeric values
+- Checkbox for reducing leaf sibling gaps
 
 **TreeViewCanvas.vue** manages:
 - The HTML canvas element
@@ -109,8 +113,8 @@ count.value++
 **Used in TreeViewCanvas.vue:**
 ```typescript
 const canvasRef = ref<HTMLCanvasElement | null>(null)
-const zoom = ref(1)
 const isPanning = ref(false)
+const { zoom } = useCanvasView()
 ```
 
 ### Computed Properties (`computed`)
@@ -241,16 +245,21 @@ Composables are functions that encapsulate and reuse stateful logic. This patter
 import { ref } from 'vue'
 import type { TreeStyle } from '@/types'
 
-// State defined outside the function is shared across all components
-const treeStyle = ref<TreeStyle>(...)
+export function createTreeStyleStore() {
+  // State is scoped to the app instance that creates the store
+  const treeStyle = ref<TreeStyle>(structuredClone(defaultTreeStyle))
 
-export function useTreeStyle() {
   function resetStyle() {
     treeStyle.value = structuredClone(defaultTreeStyle)
   }
 
   function exportStyle(): string {
-    return JSON.stringify(treeStyle.value, null, 2)
+    const preset = {
+      name: 'Exported Style',
+      style: treeStyle.value,
+      createdAt: new Date().toISOString()
+    }
+    return JSON.stringify(preset, null, 2)
   }
 
   // Return reactive state and methods
@@ -262,6 +271,17 @@ export function useTreeStyle() {
 }
 ```
 
+### Providing the Store Once (App.vue)
+
+```typescript
+import { createTreeStyleStore, provideTreeStyle } from '@/composables/useTreeStyle'
+
+const treeStyleStore = createTreeStyleStore()
+provideTreeStyle(treeStyleStore)
+```
+
+The same provide/inject pattern is used for the canvas view and debug mode stores.
+
 ### Using a Composable
 
 ```typescript
@@ -270,11 +290,12 @@ import { useTreeStyle } from '@/composables/useTreeStyle'
 
 const { treeStyle, resetStyle } = useTreeStyle()
 
-// treeStyle is reactive and shared across all components that use this composable
+// treeStyle is reactive and shared across components within the provider scope
 ```
 
 **Why this pattern?**
 - State is shared across components without prop drilling
+- State is scoped to a specific app instance (no module-level singletons)
 - Logic is organized by feature, not by component
 - Easy to test and reuse
 - Similar to a lightweight state management solution
@@ -310,12 +331,15 @@ onUpdated(() => {
 **Used in TreeViewCanvas.vue:**
 ```typescript
 onMounted(() => {
-  resizeCanvas()
+  resizeObserver = new ResizeObserver(() => resizeCanvas())
+  containerRef.value?.addEventListener('wheel', handleWheel, { passive: false })
   window.addEventListener('resize', resizeCanvas)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', resizeCanvas)
+  containerRef.value?.removeEventListener('wheel', handleWheel)
+  resizeObserver?.disconnect()
 })
 ```
 
@@ -654,7 +678,7 @@ const count = ref<number>(0)
 ### Typing Composable Returns
 
 ```typescript
-export function useTreeStyle() {
+export function createTreeStyleStore() {
   // TypeScript infers return type automatically
   // Or you can be explicit:
   return {

@@ -75,6 +75,11 @@ const verticalGap = computed({
   set: (val: number) => { treeStyle.value.layout.verticalGap = val }
 })
 
+const reduceLeafSiblingGaps = computed({
+  get: () => treeStyle.value.layout.reduceLeafSiblingGaps,
+  set: (val: boolean) => { treeStyle.value.layout.reduceLeafSiblingGaps = val }
+})
+
 const edgeWidth = computed({
   get: () => treeStyle.value.edge.width,
   set: (val: number) => { treeStyle.value.edge.width = val }
@@ -92,190 +97,192 @@ const nodePadding = computed({
 </script>
 
 <template>
-  <v-expansion-panels
-    variant="accordion"
-    multiple
-    :model-value="[0, 1, 2]"
-  >
+  <div class="panel-sections">
     <!-- Node Styles Section -->
-    <v-expansion-panel class="style-section">
-      <v-expansion-panel-title>
+    <div class="panel-section">
+      <div class="section-title">
         <v-icon
-          size="small"
+          size="x-small"
           class="mr-2"
           :icon="mdiShapeOutline"
         />
         Node Style
-      </v-expansion-panel-title>
-      <v-expansion-panel-text>
-        <div class="pa-2">
-          <div class="text-caption mb-2">
-            Shape
-          </div>
-          <v-btn-toggle
-            v-model="nodeShape"
-            mandatory
-            density="compact"
-            class="mb-3"
-          >
-            <v-btn
-              v-for="shape in nodeShapeOptions"
-              :key="shape.value"
-              :value="shape.value"
-              size="small"
-            >
-              <v-icon :icon="shape.icon" />
-              <v-tooltip
-                activator="parent"
-                location="bottom"
-              >
-                {{ shape.label }}
-              </v-tooltip>
-            </v-btn>
-          </v-btn-toggle>
-
-          <v-slider
-            v-model="nodeStrokeWidth"
-            label="Border"
-            :min="0"
-            :max="8"
-            :step="1"
-            thumb-label
-            density="compact"
-            hide-details
-            class="mb-3"
-          />
-
-          <v-slider
-            v-model="nodePadding"
-            label="Padding"
-            :min="4"
-            :max="32"
-            :step="2"
-            thumb-label
-            density="compact"
-            hide-details
-          />
+      </div>
+      <div class="section-body">
+        <div class="text-caption">
+          Shape
         </div>
-      </v-expansion-panel-text>
-    </v-expansion-panel>
+        <v-btn-toggle
+          v-model="nodeShape"
+          mandatory
+          density="compact"
+          class="mb-2"
+        >
+          <v-btn
+            v-for="shape in nodeShapeOptions"
+            :key="shape.value"
+            :value="shape.value"
+            size="small"
+          >
+            <v-icon :icon="shape.icon" />
+            <v-tooltip
+              activator="parent"
+              location="bottom"
+            >
+              {{ shape.label }}
+            </v-tooltip>
+          </v-btn>
+        </v-btn-toggle>
+
+        <v-slider
+          v-model="nodeStrokeWidth"
+          label="Border"
+          :min="0"
+          :max="8"
+          :step="1"
+          thumb-label
+          density="compact"
+          hide-details
+          class="mb-2"
+        />
+
+        <v-slider
+          v-model="nodePadding"
+          label="Padding"
+          :min="4"
+          :max="32"
+          :step="2"
+          thumb-label
+          density="compact"
+          hide-details
+        />
+      </div>
+    </div>
+
+    <v-divider class="section-divider" />
 
     <!-- Edge Styles Section -->
-    <v-expansion-panel class="style-section">
-      <v-expansion-panel-title>
+    <div class="panel-section">
+      <div class="section-title">
         <v-icon
-          size="small"
+          size="x-small"
           class="mr-2"
           :icon="mdiVectorLine"
         />
         Edge Style
-      </v-expansion-panel-title>
-      <v-expansion-panel-text>
-        <div class="pa-2">
-          <div class="text-caption mb-2">
-            Connector Type
-          </div>
-          <v-btn-toggle
-            v-model="edgeStyle"
-            mandatory
-            density="compact"
-            class="mb-3"
-          >
-            <v-btn
-              v-for="style in edgeStyleOptions"
-              :key="style.value"
-              :value="style.value"
-              size="small"
-            >
-              <v-icon :icon="style.icon" />
-              <v-tooltip
-                activator="parent"
-                location="bottom"
-              >
-                {{ style.label }}
-              </v-tooltip>
-            </v-btn>
-          </v-btn-toggle>
-
-          <v-slider
-            v-model="edgeWidth"
-            label="Line Width"
-            :min="1"
-            :max="6"
-            :step="1"
-            thumb-label
-            density="compact"
-            hide-details
-          />
+      </div>
+      <div class="section-body">
+        <div class="text-caption">
+          Connector Type
         </div>
-      </v-expansion-panel-text>
-    </v-expansion-panel>
+        <v-btn-toggle
+          v-model="edgeStyle"
+          mandatory
+          density="compact"
+          class="mb-2"
+        >
+          <v-btn
+            v-for="style in edgeStyleOptions"
+            :key="style.value"
+            :value="style.value"
+            size="small"
+          >
+            <v-icon :icon="style.icon" />
+            <v-tooltip
+              activator="parent"
+              location="bottom"
+            >
+              {{ style.label }}
+            </v-tooltip>
+          </v-btn>
+        </v-btn-toggle>
+
+        <v-slider
+          v-model="edgeWidth"
+          label="Line Width"
+          :min="1"
+          :max="6"
+          :step="1"
+          thumb-label
+          density="compact"
+          hide-details
+        />
+      </div>
+    </div>
+
+    <v-divider class="section-divider" />
 
     <!-- Layout Section -->
-    <v-expansion-panel class="style-section">
-      <v-expansion-panel-title>
+    <div class="panel-section">
+      <div class="section-title">
         <v-icon
-          size="small"
+          size="x-small"
           class="mr-2"
           :icon="mdiArrowExpandAll"
         />
         Layout
-      </v-expansion-panel-title>
-      <v-expansion-panel-text>
-        <div class="pa-2">
-          <div class="text-caption mb-2">
-            Algorithm
-          </div>
-          <div class="algorithm-grid mb-3">
-            <v-btn
-              v-for="algo in layoutAlgorithmOptions"
-              :key="algo.value"
-              :variant="layoutAlgorithm === algo.value ? 'flat' : 'outlined'"
-              :color="layoutAlgorithm === algo.value ? 'primary' : undefined"
-              size="small"
-              @click="layoutAlgorithm = algo.value"
-            >
-              {{ algo.label }}
-            </v-btn>
-          </div>
-
-          <v-slider
-            v-model="horizontalGap"
-            label="Min Gap"
-            :min="5"
-            :max="100"
-            :step="5"
-            thumb-label
-            density="compact"
-            hide-details
-            class="mb-3"
-          >
-            <template #append>
-              <span class="text-caption">{{ horizontalGap }}px</span>
-            </template>
-          </v-slider>
-
-          <v-slider
-            v-model="verticalGap"
-            label="Line Spacing"
-            :min="5"
-            :max="150"
-            :step="5"
-            thumb-label
-            density="compact"
-            hide-details
-          >
-            <template #append>
-              <span class="text-caption">{{ verticalGap }}px</span>
-            </template>
-          </v-slider>
+      </div>
+      <div class="section-body">
+        <div class="text-caption">
+          Algorithm
         </div>
-      </v-expansion-panel-text>
-    </v-expansion-panel>
-  </v-expansion-panels>
+        <div class="algorithm-grid mb-2">
+          <v-btn
+            v-for="algo in layoutAlgorithmOptions"
+            :key="algo.value"
+            :variant="layoutAlgorithm === algo.value ? 'flat' : 'outlined'"
+            :color="layoutAlgorithm === algo.value ? 'primary' : undefined"
+            size="small"
+            @click="layoutAlgorithm = algo.value"
+          >
+            {{ algo.label }}
+          </v-btn>
+        </div>
+
+        <v-slider
+          v-model="horizontalGap"
+          label="Min Gap"
+          :min="5"
+          :max="100"
+          :step="5"
+          thumb-label
+          density="compact"
+          hide-details
+          class="mb-2"
+        >
+          <template #append>
+            <span class="text-caption">{{ horizontalGap }}px</span>
+          </template>
+        </v-slider>
+
+        <v-slider
+          v-model="verticalGap"
+          label="Line Spacing"
+          :min="5"
+          :max="150"
+          :step="5"
+          thumb-label
+          density="compact"
+          hide-details
+        >
+          <template #append>
+            <span class="text-caption">{{ verticalGap }}px</span>
+          </template>
+        </v-slider>
+
+        <v-checkbox
+          v-model="reduceLeafSiblingGaps"
+          label="Reduce Leaf Sibling Gaps"
+          density="compact"
+          hide-details
+          class="mt-1"
+        />
+      </div>
+    </div>
+  </div>
 
   <!-- Debug Mode -->
-  <div class="pa-3 debug-section">
+  <div class="pa-2 debug-section">
     <v-checkbox
       v-model="debugEnabled"
       density="compact"
@@ -295,16 +302,16 @@ const nodePadding = computed({
     </v-checkbox>
     <div
       v-if="debugEnabled"
-      class="mt-2 ml-8"
+      class="mt-1 ml-6"
     >
-      <div class="text-caption text-medium-emphasis mb-2">
+      <div class="text-caption text-medium-emphasis mb-1">
         Click nodes or edges to see contours
       </div>
     </div>
   </div>
 
   <!-- Reset Button -->
-  <div class="pa-3 pt-0">
+  <div class="pa-2 pt-0">
     <v-btn
       variant="outlined"
       size="small"
@@ -321,19 +328,36 @@ const nodePadding = computed({
 </template>
 
 <style scoped>
-.style-section {
-  background: rgb(var(--v-theme-surface)) !important;
+.panel-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
 }
 
-.style-section :deep(.v-expansion-panel-title) {
-  min-height: 44px;
-  font-size: 0.75rem;
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
+  color: rgba(var(--v-theme-on-surface), 0.7);
 }
 
-.style-section :deep(.v-expansion-panel-text__wrapper) {
-  padding: 0;
+.section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.section-divider {
+  opacity: 0.6;
 }
 
 .debug-section {

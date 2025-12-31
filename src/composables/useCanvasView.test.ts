@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { useCanvasView } from './useCanvasView'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { createCanvasViewStore } from './useCanvasView'
 
 /**
  * Tests for useCanvasView composable.
@@ -11,20 +11,12 @@ import { useCanvasView } from './useCanvasView'
  * 4. resetView clears state for the current example only
  * 5. userHasInteracted flag tracks user interaction correctly
  *
- * Note: Since the composable uses module-level singletons, we use unique
- * example IDs in each test to avoid state bleeding between tests.
  */
+let store: ReturnType<typeof createCanvasViewStore>
 
-// Get a fresh instance of the composable (shares module state but that's fine)
-function getComposable() {
-  return useCanvasView()
-}
-
-// Generate unique test IDs to avoid state collision between tests
-let testCounter = 0
-function uniqueId(prefix: string) {
-  return `${prefix}-${++testCounter}-${Date.now()}`
-}
+beforeEach(() => {
+  store = createCanvasViewStore()
+})
 
 describe('useCanvasView', () => {
   describe('per-example state isolation', () => {
@@ -36,10 +28,10 @@ describe('useCanvasView', () => {
         getPanOffset,
         getZoom,
         markUserInteraction,
-      } = getComposable()
+      } = store
 
-      const example1 = uniqueId('example')
-      const example2 = uniqueId('example')
+      const example1 = 'example-1'
+      const example2 = 'example-2'
 
       // Set up example 1 with specific state
       setCurrentExample(example1)
@@ -64,10 +56,10 @@ describe('useCanvasView', () => {
     })
 
     it('new examples start with default state', () => {
-      const { setCurrentExample, getPanOffset, getZoom, hasUserInteracted } = getComposable()
+      const { setCurrentExample, getPanOffset, getZoom, hasUserInteracted } = store
 
       // Switch to a brand new example
-      setCurrentExample(uniqueId('brand-new'))
+      setCurrentExample('brand-new')
 
       expect(getPanOffset()).toEqual({ x: 0, y: 0 })
       expect(getZoom()).toBe(1)
@@ -77,9 +69,9 @@ describe('useCanvasView', () => {
 
   describe('pan operations', () => {
     it('accumulates pan deltas correctly', () => {
-      const { setCurrentExample, applyPanDelta, getPanOffset } = getComposable()
+      const { setCurrentExample, applyPanDelta, getPanOffset } = store
 
-      setCurrentExample(uniqueId('pan-test'))
+      setCurrentExample('pan-test')
 
       applyPanDelta(10, 20)
       expect(getPanOffset()).toEqual({ x: 10, y: 20 })
@@ -92,9 +84,9 @@ describe('useCanvasView', () => {
     })
 
     it('setPanOffset replaces pan state entirely', () => {
-      const { setCurrentExample, applyPanDelta, setPanOffset, getPanOffset } = getComposable()
+      const { setCurrentExample, applyPanDelta, setPanOffset, getPanOffset } = store
 
-      setCurrentExample(uniqueId('pan-replace'))
+      setCurrentExample('pan-replace')
 
       applyPanDelta(100, 200)
       expect(getPanOffset()).toEqual({ x: 100, y: 200 })
@@ -106,9 +98,9 @@ describe('useCanvasView', () => {
 
   describe('zoom operations', () => {
     it('sets zoom level correctly', () => {
-      const { setCurrentExample, setZoom, getZoom } = getComposable()
+      const { setCurrentExample, setZoom, getZoom } = store
 
-      setCurrentExample(uniqueId('zoom-test'))
+      setCurrentExample('zoom-test')
 
       setZoom(1.5)
       expect(getZoom()).toBe(1.5)
@@ -118,9 +110,9 @@ describe('useCanvasView', () => {
     })
 
     it('clamps zoom to minimum of 0.25', () => {
-      const { setCurrentExample, setZoom, getZoom } = getComposable()
+      const { setCurrentExample, setZoom, getZoom } = store
 
-      setCurrentExample(uniqueId('zoom-min'))
+      setCurrentExample('zoom-min')
 
       setZoom(0.1)
       expect(getZoom()).toBe(0.25)
@@ -133,9 +125,9 @@ describe('useCanvasView', () => {
     })
 
     it('clamps zoom to maximum of 4', () => {
-      const { setCurrentExample, setZoom, getZoom } = getComposable()
+      const { setCurrentExample, setZoom, getZoom } = store
 
-      setCurrentExample(uniqueId('zoom-max'))
+      setCurrentExample('zoom-max')
 
       setZoom(5)
       expect(getZoom()).toBe(4)
@@ -147,16 +139,16 @@ describe('useCanvasView', () => {
 
   describe('userHasInteracted flag', () => {
     it('starts as false for new examples', () => {
-      const { setCurrentExample, hasUserInteracted } = getComposable()
+      const { setCurrentExample, hasUserInteracted } = store
 
-      setCurrentExample(uniqueId('interaction-new'))
+      setCurrentExample('interaction-new')
       expect(hasUserInteracted()).toBe(false)
     })
 
     it('becomes true after markUserInteraction is called', () => {
-      const { setCurrentExample, markUserInteraction, hasUserInteracted } = getComposable()
+      const { setCurrentExample, markUserInteraction, hasUserInteracted } = store
 
-      setCurrentExample(uniqueId('interaction-mark'))
+      setCurrentExample('interaction-mark')
       expect(hasUserInteracted()).toBe(false)
 
       markUserInteraction()
@@ -164,10 +156,10 @@ describe('useCanvasView', () => {
     })
 
     it('persists per-example', () => {
-      const { setCurrentExample, markUserInteraction, hasUserInteracted } = getComposable()
+      const { setCurrentExample, markUserInteraction, hasUserInteracted } = store
 
-      const example1 = uniqueId('interaction-persist')
-      const example2 = uniqueId('interaction-persist')
+      const example1 = 'interaction-1'
+      const example2 = 'interaction-2'
 
       // Example 1: mark as interacted
       setCurrentExample(example1)
@@ -195,9 +187,9 @@ describe('useCanvasView', () => {
         getPanOffset,
         getZoom,
         hasUserInteracted,
-      } = getComposable()
+      } = store
 
-      setCurrentExample(uniqueId('reset-test'))
+      setCurrentExample('reset-test')
 
       // Set up non-default state
       applyPanDelta(100, 200)
@@ -226,10 +218,10 @@ describe('useCanvasView', () => {
         getPanOffset,
         getZoom,
         hasUserInteracted,
-      } = getComposable()
+      } = store
 
-      const example1 = uniqueId('reset-isolation')
-      const example2 = uniqueId('reset-isolation')
+      const example1 = 'reset-1'
+      const example2 = 'reset-2'
 
       // Set up example 1
       setCurrentExample(example1)
@@ -261,10 +253,10 @@ describe('useCanvasView', () => {
 
   describe('computed refs reactivity', () => {
     it('zoom computed ref reflects current example state', () => {
-      const { setCurrentExample, setZoom, zoom } = getComposable()
+      const { setCurrentExample, setZoom, zoom } = store
 
-      const example1 = uniqueId('computed-zoom')
-      const example2 = uniqueId('computed-zoom')
+      const example1 = 'computed-zoom-1'
+      const example2 = 'computed-zoom-2'
 
       setCurrentExample(example1)
       setZoom(1.5)
@@ -280,10 +272,10 @@ describe('useCanvasView', () => {
     })
 
     it('panOffset computed ref reflects current example state', () => {
-      const { setCurrentExample, applyPanDelta, panOffset } = getComposable()
+      const { setCurrentExample, applyPanDelta, panOffset } = store
 
-      const example1 = uniqueId('computed-pan')
-      const example2 = uniqueId('computed-pan')
+      const example1 = 'computed-pan-1'
+      const example2 = 'computed-pan-2'
 
       setCurrentExample(example1)
       applyPanDelta(10, 20)
@@ -300,7 +292,7 @@ describe('useCanvasView', () => {
 
   describe('edge cases', () => {
     it('handles empty string example ID by returning fresh default state', () => {
-      const { setCurrentExample, getPanOffset, getZoom } = getComposable()
+      const { setCurrentExample, getPanOffset, getZoom } = store
 
       setCurrentExample('')
 
@@ -310,9 +302,9 @@ describe('useCanvasView', () => {
     })
 
     it('handles rapid example switching', () => {
-      const { setCurrentExample, applyPanDelta, getPanOffset } = getComposable()
+      const { setCurrentExample, applyPanDelta, getPanOffset } = store
 
-      const prefix = uniqueId('rapid')
+      const prefix = 'rapid'
 
       // Rapidly switch and modify
       for (let i = 0; i < 10; i++) {
@@ -328,18 +320,18 @@ describe('useCanvasView', () => {
     })
 
     it('handles very large pan values', () => {
-      const { setCurrentExample, setPanOffset, getPanOffset } = getComposable()
+      const { setCurrentExample, setPanOffset, getPanOffset } = store
 
-      setCurrentExample(uniqueId('large-pan'))
+      setCurrentExample('large-pan')
       setPanOffset(1e10, -1e10)
 
       expect(getPanOffset()).toEqual({ x: 1e10, y: -1e10 })
     })
 
     it('handles fractional zoom values', () => {
-      const { setCurrentExample, setZoom, getZoom } = getComposable()
+      const { setCurrentExample, setZoom, getZoom } = store
 
-      setCurrentExample(uniqueId('fractional-zoom'))
+      setCurrentExample('fractional-zoom')
       setZoom(1.333333)
 
       expect(getZoom()).toBeCloseTo(1.333333, 5)
@@ -354,7 +346,7 @@ describe('useCanvasView - bug regression tests', () => {
       // Without an example ID set, getCurrentViewState() returns a new default object
       // each time, so changes are not persisted to the Map.
 
-      const { setCurrentExample, applyPanDelta, getPanOffset } = getComposable()
+      const { setCurrentExample, applyPanDelta, getPanOffset } = store
 
       // Explicitly set empty to simulate no example
       setCurrentExample('')
@@ -370,9 +362,9 @@ describe('useCanvasView - bug regression tests', () => {
     })
 
     it('state DOES persist when a valid example ID is set', () => {
-      const { setCurrentExample, applyPanDelta, getPanOffset } = getComposable()
+      const { setCurrentExample, applyPanDelta, getPanOffset } = store
 
-      setCurrentExample(uniqueId('valid-id'))
+      setCurrentExample('valid-id')
       applyPanDelta(100, 100)
 
       expect(getPanOffset()).toEqual({ x: 100, y: 100 })
@@ -392,9 +384,9 @@ describe('useCanvasView - bug regression tests', () => {
         getPanOffset,
         getZoom,
         hasUserInteracted,
-      } = getComposable()
+      } = store
 
-      const exampleId = uniqueId('order-test')
+      const exampleId = 'order-test'
 
       // Correct order: set example ID first
       setCurrentExample(exampleId)
@@ -408,7 +400,7 @@ describe('useCanvasView - bug regression tests', () => {
       expect(hasUserInteracted()).toBe(true)
 
       // Even after switching away and back
-      setCurrentExample(uniqueId('other'))
+      setCurrentExample('other')
       setCurrentExample(exampleId)
 
       expect(getPanOffset()).toEqual({ x: 50, y: 75 })
@@ -425,10 +417,10 @@ describe('useCanvasView - bug regression tests', () => {
         setZoom,
         getPanOffset,
         getZoom,
-      } = getComposable()
+      } = store
 
-      const example1 = uniqueId('isolation-1')
-      const example2 = uniqueId('isolation-2')
+      const example1 = 'isolation-1'
+      const example2 = 'isolation-2'
 
       // Initialize example 1 with known state
       setCurrentExample(example1)
@@ -452,7 +444,7 @@ describe('useCanvasView - bug regression tests', () => {
       expect(getZoom()).toBe(1.0)
 
       function setPanAndZoom(x: number, y: number, z: number) {
-        const { setPanOffset, setZoom } = getComposable()
+        const { setPanOffset, setZoom } = store
         setPanOffset(x, y)
         setZoom(z)
       }
@@ -462,9 +454,9 @@ describe('useCanvasView - bug regression tests', () => {
 
 describe('useCanvasView - invariant tests', () => {
   it('zoom is always within bounds [0.25, 4]', () => {
-    const { setCurrentExample, setZoom, getZoom } = getComposable()
+    const { setCurrentExample, setZoom, getZoom } = store
 
-    setCurrentExample(uniqueId('zoom-bounds'))
+    setCurrentExample('zoom-bounds')
 
     const testValues = [-100, -1, 0, 0.1, 0.24, 0.25, 0.5, 1, 2, 4, 4.01, 5, 100]
 
@@ -477,9 +469,9 @@ describe('useCanvasView - invariant tests', () => {
   })
 
   it('panOffset values are finite numbers', () => {
-    const { setCurrentExample, applyPanDelta, getPanOffset } = getComposable()
+    const { setCurrentExample, applyPanDelta, getPanOffset } = store
 
-    setCurrentExample(uniqueId('pan-finite'))
+    setCurrentExample('pan-finite')
 
     // Apply various deltas
     applyPanDelta(100, -50)
@@ -491,9 +483,9 @@ describe('useCanvasView - invariant tests', () => {
   })
 
   it('hasUserInteracted starts false and stays true once set', () => {
-    const { setCurrentExample, markUserInteraction, hasUserInteracted, resetView } = getComposable()
+    const { setCurrentExample, markUserInteraction, hasUserInteracted, resetView } = store
 
-    setCurrentExample(uniqueId('interaction-invariant'))
+    setCurrentExample('interaction-invariant')
 
     // Starts false
     expect(hasUserInteracted()).toBe(false)
@@ -522,9 +514,9 @@ describe('useCanvasView - invariant tests', () => {
       getPanOffset,
       getZoom,
       hasUserInteracted,
-    } = getComposable()
+    } = store
 
-    setCurrentExample(uniqueId('clear-interaction'))
+    setCurrentExample('clear-interaction')
 
     // Set up state
     applyPanDelta(100, 200)
@@ -542,19 +534,16 @@ describe('useCanvasView - invariant tests', () => {
     expect(getZoom()).toBe(1.5)
   })
 
-  it('multiple calls to useCanvasView return same shared state', () => {
-    // This tests the singleton pattern
-    const composable1 = useCanvasView()
-    const composable2 = useCanvasView()
+  it('store instances do not share state', () => {
+    const storeA = createCanvasViewStore()
+    const storeB = createCanvasViewStore()
 
-    const exampleId = uniqueId('singleton-test')
+    storeA.setCurrentExample('example')
+    storeA.setPanOffset(42, 43)
+    storeA.setZoom(1.75)
 
-    composable1.setCurrentExample(exampleId)
-    composable1.setPanOffset(42, 43)
-    composable1.setZoom(1.75)
-
-    // composable2 should see the same state
-    expect(composable2.getPanOffset()).toEqual({ x: 42, y: 43 })
-    expect(composable2.getZoom()).toBe(1.75)
+    storeB.setCurrentExample('example')
+    expect(storeB.getPanOffset()).toEqual({ x: 0, y: 0 })
+    expect(storeB.getZoom()).toBe(1)
   })
 })

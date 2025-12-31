@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useTreeStyle } from './useTreeStyle'
+import { createTreeStyleStore } from './useTreeStyle'
 import { defaultTreeStyle } from '@/types'
 
 /**
@@ -11,23 +11,19 @@ import { defaultTreeStyle } from '@/types'
  * 3. Direct mutations to treeStyle are reactive
  * 4. exportStyle/importStyle round-trip preserves data
  * 5. importStyle validates structure
- * 6. Multiple calls share the same state (singleton pattern)
+ * 6. Store instances are isolated
  */
 
-function getComposable() {
-  return useTreeStyle()
-}
+let store: ReturnType<typeof createTreeStyleStore>
 
-// Reset to default state before each test
 beforeEach(() => {
-  const { resetStyle } = getComposable()
-  resetStyle()
+  store = createTreeStyleStore()
 })
 
 describe('useTreeStyle', () => {
   describe('default values', () => {
     it('has correct default node style', () => {
-      const { treeStyle } = getComposable()
+      const { treeStyle } = store
 
       expect(treeStyle.value.node).toEqual({
         shape: 'rounded-rectangle',
@@ -39,7 +35,7 @@ describe('useTreeStyle', () => {
     })
 
     it('has correct default edge style', () => {
-      const { treeStyle } = getComposable()
+      const { treeStyle } = store
 
       expect(treeStyle.value.edge).toEqual({
         style: 'org-chart',
@@ -50,19 +46,20 @@ describe('useTreeStyle', () => {
     })
 
     it('has correct default layout settings', () => {
-      const { treeStyle } = getComposable()
+      const { treeStyle } = store
 
       expect(treeStyle.value.layout).toEqual({
         algorithm: 'bounding-box',
         horizontalGap: 10,
         verticalGap: 40,
+        reduceLeafSiblingGaps: false,
       })
     })
   })
 
   describe('resetStyle', () => {
     it('resets node styles to defaults', () => {
-      const { treeStyle, resetStyle } = getComposable()
+      const { treeStyle, resetStyle } = store
 
       // Modify node style
       treeStyle.value.node.shape = 'circle'
@@ -77,7 +74,7 @@ describe('useTreeStyle', () => {
     })
 
     it('resets edge styles to defaults', () => {
-      const { treeStyle, resetStyle } = getComposable()
+      const { treeStyle, resetStyle } = store
 
       treeStyle.value.edge.style = 'curve'
       treeStyle.value.edge.width = 6
@@ -89,7 +86,7 @@ describe('useTreeStyle', () => {
     })
 
     it('resets layout settings to defaults', () => {
-      const { treeStyle, resetStyle } = getComposable()
+      const { treeStyle, resetStyle } = store
 
       treeStyle.value.layout.algorithm = 'tidy'
       treeStyle.value.layout.horizontalGap = 100
@@ -105,7 +102,7 @@ describe('useTreeStyle', () => {
 
   describe('applyExampleStyle', () => {
     it('applies partial node overrides while keeping other defaults', () => {
-      const { treeStyle, applyExampleStyle } = getComposable()
+      const { treeStyle, applyExampleStyle } = store
 
       // Modify to non-default values first
       treeStyle.value.node.shape = 'ellipse'
@@ -126,7 +123,7 @@ describe('useTreeStyle', () => {
     })
 
     it('applies partial edge overrides', () => {
-      const { treeStyle, applyExampleStyle } = getComposable()
+      const { treeStyle, applyExampleStyle } = store
 
       applyExampleStyle({
         edge: { style: 'straight-arrow', width: 4 },
@@ -139,7 +136,7 @@ describe('useTreeStyle', () => {
     })
 
     it('applies partial layout overrides', () => {
-      const { treeStyle, applyExampleStyle } = getComposable()
+      const { treeStyle, applyExampleStyle } = store
 
       applyExampleStyle({
         layout: { algorithm: 'tidy' },
@@ -152,7 +149,7 @@ describe('useTreeStyle', () => {
     })
 
     it('applying undefined style resets to defaults', () => {
-      const { treeStyle, applyExampleStyle } = getComposable()
+      const { treeStyle, applyExampleStyle } = store
 
       // Modify everything
       treeStyle.value.node.shape = 'ellipse'
@@ -165,7 +162,7 @@ describe('useTreeStyle', () => {
     })
 
     it('starts fresh from defaults (INVARIANT: merge with defaults, not current state)', () => {
-      const { treeStyle, applyExampleStyle } = getComposable()
+      const { treeStyle, applyExampleStyle } = store
 
       // Set to non-default
       treeStyle.value.node.fillColor = '#ff0000'
@@ -182,7 +179,7 @@ describe('useTreeStyle', () => {
 
   describe('exportStyle and importStyle', () => {
     it('exportStyle produces valid JSON', () => {
-      const { exportStyle } = getComposable()
+      const { exportStyle } = store
 
       const json = exportStyle()
 
@@ -190,7 +187,7 @@ describe('useTreeStyle', () => {
     })
 
     it('exportStyle includes style preset wrapper', () => {
-      const { exportStyle } = getComposable()
+      const { exportStyle } = store
 
       const parsed = JSON.parse(exportStyle())
 
@@ -200,7 +197,7 @@ describe('useTreeStyle', () => {
     })
 
     it('round-trip preserves style data', () => {
-      const { treeStyle, exportStyle, importStyle, resetStyle } = getComposable()
+      const { treeStyle, exportStyle, importStyle, resetStyle } = store
 
       // Modify to custom values
       treeStyle.value.node.shape = 'ellipse'
@@ -228,7 +225,7 @@ describe('useTreeStyle', () => {
     })
 
     it('importStyle returns false for invalid JSON', () => {
-      const { importStyle } = getComposable()
+      const { importStyle } = store
 
       expect(importStyle('not valid json')).toBe(false)
       expect(importStyle('{')).toBe(false)
@@ -236,7 +233,7 @@ describe('useTreeStyle', () => {
     })
 
     it('importStyle returns false for missing required sections', () => {
-      const { importStyle } = getComposable()
+      const { importStyle } = store
 
       // Missing style object
       expect(importStyle(JSON.stringify({ name: 'test' }))).toBe(false)
@@ -247,7 +244,7 @@ describe('useTreeStyle', () => {
     })
 
     it('importStyle accepts raw TreeStyle object', () => {
-      const { importStyle, treeStyle, resetStyle } = getComposable()
+      const { importStyle, treeStyle, resetStyle } = store
 
       const rawStyle = {
         node: { ...defaultTreeStyle.node, shape: 'circle' as const },
@@ -267,7 +264,7 @@ describe('useTreeStyle', () => {
 
   describe('direct mutation reactivity', () => {
     it('node property mutations are reactive', () => {
-      const { treeStyle } = getComposable()
+      const { treeStyle } = store
 
       treeStyle.value.node.shape = 'ellipse'
       expect(treeStyle.value.node.shape).toBe('ellipse')
@@ -277,39 +274,34 @@ describe('useTreeStyle', () => {
     })
 
     it('edge property mutations are reactive', () => {
-      const { treeStyle } = getComposable()
+      const { treeStyle } = store
 
       treeStyle.value.edge.width = 4
       expect(treeStyle.value.edge.width).toBe(4)
     })
 
     it('layout property mutations are reactive', () => {
-      const { treeStyle } = getComposable()
+      const { treeStyle } = store
 
       treeStyle.value.layout.horizontalGap = 50
       expect(treeStyle.value.layout.horizontalGap).toBe(50)
     })
   })
 
-  describe('singleton pattern', () => {
-    it('multiple calls to useTreeStyle share the same state', () => {
-      const composable1 = useTreeStyle()
-      const composable2 = useTreeStyle()
+  describe('store instances', () => {
+    it('do not share state between instances', () => {
+      const storeA = createTreeStyleStore()
+      const storeB = createTreeStyleStore()
 
-      composable1.treeStyle.value.node.shape = 'circle'
+      storeA.treeStyle.value.node.shape = 'circle'
 
-      // composable2 should see the same change
-      expect(composable2.treeStyle.value.node.shape).toBe('circle')
-
-      // And changes from composable2 should be visible to composable1
-      composable2.treeStyle.value.edge.width = 6
-      expect(composable1.treeStyle.value.edge.width).toBe(6)
+      expect(storeB.treeStyle.value.node.shape).toBe('rounded-rectangle')
     })
   })
 
   describe('state isolation from defaults', () => {
     it('modifying treeStyle does not modify defaultTreeStyle', () => {
-      const { treeStyle } = getComposable()
+      const { treeStyle } = store
 
       // Store original default values
       const originalNodeShape = defaultTreeStyle.node.shape

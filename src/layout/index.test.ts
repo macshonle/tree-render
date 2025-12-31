@@ -40,6 +40,7 @@ function createTestStyle(overrides: Partial<TreeStyle['layout']> = {}): TreeStyl
       algorithm: 'bounding-box',
       horizontalGap: 10,
       verticalGap: 40,
+      reduceLeafSiblingGaps: false,
       ...overrides,
     },
   }

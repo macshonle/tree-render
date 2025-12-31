@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, reactive, provide, inject, type InjectionKey, type Ref, type ComputedRef } from 'vue'
 
 /**
  * Canvas view state (pan and zoom) stored per-example.
@@ -8,7 +8,7 @@ import { ref, computed } from 'vue'
  *
  * Default positioning places the tree with:
  * - Left boundary at horizontalGap from canvas left edge
- * - Root top at verticalGap from canvas top edge
+ * - Root top at horizontalGap from canvas top edge
  */
 
 interface ViewState {
@@ -19,6 +19,23 @@ interface ViewState {
   userHasInteracted: boolean
 }
 
+export interface CanvasViewStore {
+  panOffset: ComputedRef<{ x: number; y: number }>
+  zoom: ComputedRef<number>
+  userHasInteracted: ComputedRef<boolean>
+  currentExampleId: Ref<string>
+  setCurrentExample: (exampleId: string) => void
+  resetView: () => void
+  markUserInteraction: () => void
+  clearUserInteraction: () => void
+  applyPanDelta: (dx: number, dy: number) => void
+  setZoom: (newZoom: number) => void
+  setPanOffset: (x: number, y: number) => void
+  getPanOffset: () => { x: number; y: number }
+  getZoom: () => number
+  hasUserInteracted: () => boolean
+}
+
 function createDefaultViewState(): ViewState {
   return {
     panOffset: { x: 0, y: 0 },
@@ -27,49 +44,30 @@ function createDefaultViewState(): ViewState {
   }
 }
 
-// Store view state per example ID
-const viewStateMap = new Map<string, ViewState>()
+export function createCanvasViewStore(): CanvasViewStore {
+  // Store view state per example ID
+  const viewStates = reactive<Record<string, ViewState>>({})
 
-// Current example ID being viewed
-const currentExampleId = ref<string>('')
+  // Current example ID being viewed
+  const currentExampleId = ref<string>('')
 
-// Reactive trigger - increment this to force computed refs to re-evaluate
-// This is needed because the ViewState objects in the Map aren't reactive
-const stateVersion = ref(0)
-
-// Get or create view state for current example
-function getCurrentViewState(): ViewState {
-  const id = currentExampleId.value
-  if (!id) {
-    // No example selected, use a default state
-    return createDefaultViewState()
+  // Get or create view state for current example
+  function getCurrentViewState(): ViewState {
+    const id = currentExampleId.value
+    if (!id) {
+      // No example selected, use a default state
+      return createDefaultViewState()
+    }
+    if (!viewStates[id]) {
+      viewStates[id] = createDefaultViewState()
+    }
+    return viewStates[id]
   }
-  if (!viewStateMap.has(id)) {
-    viewStateMap.set(id, createDefaultViewState())
-  }
-  return viewStateMap.get(id)!
-}
 
-// Notify that state has changed (for reactivity)
-function notifyStateChange() {
-  stateVersion.value++
-}
-
-export function useCanvasView() {
   // Computed refs that read from per-example state
-  // Include stateVersion.value to ensure reactivity when state changes
-  const panOffset = computed(() => {
-    void stateVersion.value // dependency for reactivity
-    return getCurrentViewState().panOffset
-  })
-  const zoom = computed(() => {
-    void stateVersion.value // dependency for reactivity
-    return getCurrentViewState().zoom
-  })
-  const userHasInteracted = computed(() => {
-    void stateVersion.value // dependency for reactivity
-    return getCurrentViewState().userHasInteracted
-  })
+  const panOffset = computed(() => getCurrentViewState().panOffset)
+  const zoom = computed(() => getCurrentViewState().zoom)
+  const userHasInteracted = computed(() => getCurrentViewState().userHasInteracted)
 
   /**
    * Set the current example ID. Called when switching examples.
@@ -77,6 +75,9 @@ export function useCanvasView() {
    */
   function setCurrentExample(exampleId: string) {
     currentExampleId.value = exampleId
+    if (exampleId && !viewStates[exampleId]) {
+      viewStates[exampleId] = createDefaultViewState()
+    }
   }
 
   /**
@@ -88,7 +89,6 @@ export function useCanvasView() {
     state.panOffset = { x: 0, y: 0 }
     state.zoom = 1
     state.userHasInteracted = false
-    notifyStateChange()
   }
 
   /**
@@ -98,7 +98,6 @@ export function useCanvasView() {
   function markUserInteraction() {
     const state = getCurrentViewState()
     state.userHasInteracted = true
-    notifyStateChange()
   }
 
   /**
@@ -108,7 +107,6 @@ export function useCanvasView() {
   function clearUserInteraction() {
     const state = getCurrentViewState()
     state.userHasInteracted = false
-    notifyStateChange()
   }
 
   /**
@@ -119,7 +117,6 @@ export function useCanvasView() {
     const state = getCurrentViewState()
     state.panOffset.x += dx
     state.panOffset.y += dy
-    notifyStateChange()
   }
 
   /**
@@ -129,7 +126,6 @@ export function useCanvasView() {
   function setZoom(newZoom: number) {
     const state = getCurrentViewState()
     state.zoom = Math.max(0.25, Math.min(4, newZoom))
-    notifyStateChange()
   }
 
   /**
@@ -138,7 +134,6 @@ export function useCanvasView() {
   function setPanOffset(x: number, y: number) {
     const state = getCurrentViewState()
     state.panOffset = { x, y }
-    notifyStateChange()
   }
 
   /**
@@ -178,4 +173,18 @@ export function useCanvasView() {
     getZoom,
     hasUserInteracted,
   }
+}
+
+const canvasViewKey: InjectionKey<CanvasViewStore> = Symbol('CanvasViewStore')
+
+export function provideCanvasView(store: CanvasViewStore) {
+  provide(canvasViewKey, store)
+}
+
+export function useCanvasView(): CanvasViewStore {
+  const store = inject(canvasViewKey)
+  if (!store) {
+    throw new Error('CanvasViewStore is not provided')
+  }
+  return store
 }

@@ -6,7 +6,6 @@ import {
   translateBounds,
   mergeBounds,
   nodeBounds,
-  calculateChildrenTotalWidth,
 } from '../utils'
 import {
   createNodeContour,
@@ -34,7 +33,7 @@ export const boundingBoxLayout: LayoutAlgorithm = (
   children: LaidOutChild[],
   context
 ): LayoutResult => {
-  const { horizontalGap, verticalGap } = context.layout
+  const { horizontalGap, verticalGap, reduceLeafSiblingGaps } = context.layout
   const nodeSize = calculateNodeSize(node, context)
 
   // Position current node at origin (will be translated by parent)
@@ -61,9 +60,24 @@ export const boundingBoxLayout: LayoutAlgorithm = (
     }
   }
 
+  function isLeaf(child: LaidOutChild): boolean {
+    return !child.node.children || child.node.children.length === 0
+  }
+
+  function getSiblingGap(left: LaidOutChild, right: LaidOutChild): number {
+    if (reduceLeafSiblingGaps && isLeaf(left) && isLeaf(right)) {
+      return horizontalGap / 2
+    }
+    return horizontalGap
+  }
+
   // Calculate child subtree widths for horizontal positioning
   const childWidths = children.map((c) => c.layout.bounds.right - c.layout.bounds.left)
-  const totalChildrenWidth = calculateChildrenTotalWidth(childWidths, horizontalGap)
+  const childGaps = children.length > 1
+    ? children.slice(0, -1).map((child, index) => getSiblingGap(child, children[index + 1]))
+    : []
+  const totalChildrenWidth = childWidths.reduce((sum, width) => sum + width, 0) +
+    childGaps.reduce((sum, gap) => sum + gap, 0)
 
   // For top alignment: all children have their root tops at the same y
   // Parent bottom is at nodeSize.height / 2
@@ -110,7 +124,7 @@ export const boundingBoxLayout: LayoutAlgorithm = (
       height: childLayout.root.height,
     })
 
-    currentX += childWidth + horizontalGap
+    currentX += childWidth + (childGaps[i] ?? 0)
   }
 
   // Build edge-aware polygon contour for this subtree

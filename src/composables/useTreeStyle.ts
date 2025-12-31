@@ -1,19 +1,32 @@
-import { ref } from 'vue'
+import { ref, provide, inject, type InjectionKey, type Ref } from 'vue'
 import { type TreeStyle, type StylePreset, type DeepPartial, defaultTreeStyle } from '@/types'
 
-// Reactive tree style state
-const treeStyle = ref<TreeStyle>(structuredClone(defaultTreeStyle))
+export interface TreeStyleStore {
+  treeStyle: Ref<TreeStyle>
+  resetStyle: () => void
+  applyExampleStyle: (styleOverrides?: DeepPartial<TreeStyle>) => void
+  exportStyle: () => string
+  importStyle: (jsonString: string) => boolean
+  downloadStyle: (filename?: string) => void
+  loadStyleFromFile: (file: File) => Promise<boolean>
+}
 
-export function useTreeStyle() {
+function createStyleCopy(): TreeStyle {
+  return structuredClone(defaultTreeStyle)
+}
+
+export function createTreeStyleStore(): TreeStyleStore {
+  const treeStyle = ref<TreeStyle>(createStyleCopy())
+
   // Reset to default style
   function resetStyle() {
-    treeStyle.value = structuredClone(defaultTreeStyle)
+    treeStyle.value = createStyleCopy()
   }
 
   // Apply example-specific style overrides (merged with defaults)
   function applyExampleStyle(styleOverrides?: DeepPartial<TreeStyle>) {
     // Start with a fresh copy of defaults
-    const newStyle = structuredClone(defaultTreeStyle)
+    const newStyle = createStyleCopy()
 
     // Merge in the example-specific overrides
     if (styleOverrides) {
@@ -88,4 +101,18 @@ export function useTreeStyle() {
     downloadStyle,
     loadStyleFromFile
   }
+}
+
+const treeStyleKey: InjectionKey<TreeStyleStore> = Symbol('TreeStyleStore')
+
+export function provideTreeStyle(store: TreeStyleStore) {
+  provide(treeStyleKey, store)
+}
+
+export function useTreeStyle(): TreeStyleStore {
+  const store = inject(treeStyleKey)
+  if (!store) {
+    throw new Error('TreeStyleStore is not provided')
+  }
+  return store
 }

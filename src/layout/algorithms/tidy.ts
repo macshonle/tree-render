@@ -38,8 +38,21 @@ export const tidyLayout: LayoutAlgorithm = (
   children: LaidOutChild[],
   context
 ): LayoutResult => {
-  const { horizontalGap, verticalGap } = context.layout
+  const { horizontalGap, verticalGap, reduceLeafSiblingGaps } = context.layout
   const nodeSize = calculateNodeSize(node, context)
+
+  function isLeaf(child: LaidOutChild): boolean {
+    return !child.node.children || child.node.children.length === 0
+  }
+
+  function isLeafSiblingPair(leftIndex: number, rightIndex: number): boolean {
+    if (!reduceLeafSiblingGaps) return false
+    return isLeaf(children[leftIndex]) && isLeaf(children[rightIndex])
+  }
+
+  function gapForIndex(leftIndex: number, rightIndex: number): number {
+    return isLeafSiblingPair(leftIndex, rightIndex) ? horizontalGap / 2 : horizontalGap
+  }
 
   // Position current node at origin (will be translated by parent)
   const layoutNode: LayoutNode = {
@@ -77,10 +90,10 @@ export const tidyLayout: LayoutAlgorithm = (
   )
 
   // Phase 1: Calculate LR positions (left-to-right placement)
-  const positionsLR = calculateLRPositions(children, childOffsetYs, horizontalGap)
+  const positionsLR = calculateLRPositions(children, childOffsetYs, gapForIndex)
 
   // Phase 2: Calculate RL positions (right-to-left placement)
-  const positionsRL = calculateRLPositions(children, childOffsetYs, horizontalGap)
+  const positionsRL = calculateRLPositions(children, childOffsetYs, gapForIndex)
 
   // Phase 3: Average positions for symmetry
   const positionsAvg = children.map(
@@ -92,7 +105,8 @@ export const tidyLayout: LayoutAlgorithm = (
     positionsAvg,
     children,
     childOffsetYs,
-    horizontalGap
+    gapForIndex,
+    isLeafSiblingPair
   )
 
   // Phase 5: Center under parent
@@ -165,7 +179,7 @@ export const tidyLayout: LayoutAlgorithm = (
 function calculateLRPositions(
   children: LaidOutChild[],
   childOffsetYs: number[],
-  horizontalGap: number
+  gapForIndex: (leftIndex: number, rightIndex: number) => number
 ): number[] {
   const positions: number[] = []
   let forestContour: YMonotonePolygon | null = null
@@ -187,10 +201,11 @@ function calculateLRPositions(
         0,
         childOffsetY
       )
+      const gap = gapForIndex(i - 1, i)
       childOffsetX = calculatePlacementOffset(
         forestContour,
         childContourAtY,
-        horizontalGap
+        gap
       )
     }
 
@@ -219,7 +234,7 @@ function calculateLRPositions(
 function calculateRLPositions(
   children: LaidOutChild[],
   childOffsetYs: number[],
-  horizontalGap: number
+  gapForIndex: (leftIndex: number, rightIndex: number) => number
 ): number[] {
   const positions: number[] = new Array(children.length)
   let forestContour: YMonotonePolygon | null = null
@@ -242,10 +257,11 @@ function calculateRLPositions(
         childOffsetY
       )
       // Calculate offset to place child to the left of forest with gap
+      const gap = gapForIndex(i, i + 1)
       const offset = calculatePlacementOffset(
         childContourAtY,
         forestContour,
-        horizontalGap
+        gap
       )
       childOffsetX = -offset
     }
@@ -269,17 +285,19 @@ function calculateRLPositions(
 }
 
 /**
- * Redistribute gaps evenly across siblings (apportionment).
+ * Redistribute gaps across siblings (apportionment).
  *
- * Calculates the current gaps between all adjacent siblings,
- * computes the average gap, and redistributes positions so all
- * gaps are equal to the average (but not less than horizontalGap).
+ * Calculates current gaps between adjacent siblings, computes
+ * average gaps for leaf and non-leaf pairs, and redistributes
+ * positions so gaps move toward their group average while
+ * respecting per-pair minimum gaps.
  */
 function apportionGaps(
   positions: number[],
   children: LaidOutChild[],
   childOffsetYs: number[],
-  horizontalGap: number
+  gapForIndex: (leftIndex: number, rightIndex: number) => number,
+  isLeafSiblingPair: (leftIndex: number, rightIndex: number) => boolean
 ): number[] {
   if (children.length <= 1) {
     return [...positions]
@@ -287,6 +305,8 @@ function apportionGaps(
 
   // Calculate actual gaps between adjacent children using contours
   const gaps: number[] = []
+  const leafGaps: number[] = []
+  const nonLeafGaps: number[] = []
   for (let i = 0; i < children.length - 1; i++) {
     const leftContour = translateContour(
       children[i].layout.polygonContour,
@@ -299,20 +319,34 @@ function apportionGaps(
       childOffsetYs[i + 1]
     )
     const gap = findMinHorizontalGap(leftContour, rightContour)
-    gaps.push(gap ?? horizontalGap)
+    const resolvedGap = gap ?? gapForIndex(i, i + 1)
+    gaps.push(resolvedGap)
+    if (isLeafSiblingPair(i, i + 1)) {
+      leafGaps.push(resolvedGap)
+    } else {
+      nonLeafGaps.push(resolvedGap)
+    }
   }
 
-  // Calculate average gap (but ensure it's at least horizontalGap)
   const totalGap = gaps.reduce((sum, g) => sum + g, 0)
-  const avgGap = Math.max(totalGap / gaps.length, horizontalGap)
+  const avgGap = totalGap / gaps.length
+  const leafAvg = leafGaps.length > 0
+    ? leafGaps.reduce((sum, g) => sum + g, 0) / leafGaps.length
+    : avgGap
+  const nonLeafAvg = nonLeafGaps.length > 0
+    ? nonLeafGaps.reduce((sum, g) => sum + g, 0) / nonLeafGaps.length
+    : avgGap
 
   // Redistribute: first child stays, others adjusted to achieve even gaps
   const result: number[] = [positions[0]]
   let cumulativeShift = 0
 
   for (let i = 1; i < children.length; i++) {
-    // How much we need to shift this child to make the previous gap equal to avgGap
-    const gapAdjustment = avgGap - gaps[i - 1]
+    const minGap = gapForIndex(i - 1, i)
+    const targetGap = isLeafSiblingPair(i - 1, i)
+      ? Math.max(leafAvg, minGap)
+      : Math.max(nonLeafAvg, minGap)
+    const gapAdjustment = targetGap - gaps[i - 1]
     cumulativeShift += gapAdjustment
     result.push(positions[i] + cumulativeShift)
   }
