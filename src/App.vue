@@ -134,7 +134,7 @@ async function handleFileSelect(event: Event) {
         <v-btn
           variant="text"
           size="small"
-          class="mr-2"
+          class="mr-2 theme-toggle"
           @click="cycleTheme"
         >
           <v-icon start>
@@ -232,5 +232,10 @@ async function handleFileSelect(event: Event) {
   position: relative;
   overflow: hidden;
   background: rgb(var(--v-theme-background));
+}
+
+.theme-toggle {
+  width: 128px;
+  justify-content: center;
 }
 </style>

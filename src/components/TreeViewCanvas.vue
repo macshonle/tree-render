@@ -5,6 +5,7 @@ import type { TreeStyle, TreeExample, LayoutNode, YMonotonePolygon, ContourPoint
 import { layoutTree, createCanvasTextMeasurer } from '@/layout'
 import { useDebugMode } from '@/composables/useDebugMode'
 import { useCanvasView } from '@/composables/useCanvasView'
+import { preserveRootPosition } from '@/components/treeViewPositioning'
 
 const props = defineProps<{
   styleConfig: TreeStyle
@@ -165,39 +166,36 @@ function draw() {
   const zoom = getZoom()
   const currentAlgorithm = props.styleConfig.layout.algorithm
 
-  // Preserve root position when switching layout algorithms (but not during pan/zoom)
-  // Only adjust if:
-  // 1. User has previously panned/zoomed in this example
-  // 2. We're not currently in a pan/zoom operation
-  // 3. The algorithm changed (layout recalculated)
-  // 4. We have a previous root position to preserve
   const algorithmChanged = previousLayoutAlgorithm !== null && previousLayoutAlgorithm !== currentAlgorithm
-  if (hasUserInteracted() && !isInteracting && algorithmChanged &&
-      previousRootScreenX !== null && previousRootScreenY !== null) {
-    // Calculate where root would appear with current pan
-    const newRootScreenX = horizontalGap + panOffset.x + (layoutRoot.x + offsetX) * zoom
-    const newRootScreenY = horizontalGap + panOffset.y + (layoutRoot.y + offsetY) * zoom
-
-    // Adjust pan to keep root at previous screen position
-    const panAdjustX = previousRootScreenX - newRootScreenX
-    const panAdjustY = previousRootScreenY - newRootScreenY
-
-    if (Math.abs(panAdjustX) > 0.5 || Math.abs(panAdjustY) > 0.5) {
-      setPanOffset(panOffset.x + panAdjustX, panOffset.y + panAdjustY)
-    }
+  const rootPosition = preserveRootPosition({
+    horizontalGap,
+    panOffset,
+    layoutRootX: layoutRoot.x,
+    layoutRootY: layoutRoot.y,
+    offsetX,
+    offsetY,
+    zoom,
+    previousRootScreenX,
+    previousRootScreenY,
+    hasUserInteracted: hasUserInteracted(),
+    isInteracting,
+    algorithmChanged,
+  })
+  if (rootPosition.didAdjust) {
+    setPanOffset(rootPosition.panOffset.x, rootPosition.panOffset.y)
   }
 
   // Update tracking state for next redraw
   previousLayoutAlgorithm = currentAlgorithm
-  previousRootScreenX = horizontalGap + panOffset.x + (layoutRoot.x + offsetX) * zoom
-  previousRootScreenY = horizontalGap + panOffset.y + (layoutRoot.y + offsetY) * zoom
+  previousRootScreenX = rootPosition.rootScreenX
+  previousRootScreenY = rootPosition.rootScreenY
 
   // Apply transformations
   // Position tree at top-left with gaps:
   // - Tree left boundary at horizontalGap from canvas left edge
   // - Root top at horizontalGap from canvas top edge (same margin for both)
   ctx.save()
-  ctx.translate(horizontalGap + panOffset.x, horizontalGap + panOffset.y)
+  ctx.translate(horizontalGap + rootPosition.panOffset.x, horizontalGap + rootPosition.panOffset.y)
   ctx.scale(zoom, zoom)
 
   // Calculate shape-specific vertical offset for edge attachment points
