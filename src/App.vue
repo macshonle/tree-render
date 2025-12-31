@@ -86,19 +86,24 @@ async function handleFileSelect(event: Event) {
   <v-app>
     <div class="app-container">
       <!-- Top Toolbar -->
-      <v-toolbar density="compact" class="toolbar-panel">
-        <v-toolbar-title class="text-body-2">Tree Render</v-toolbar-title>
+      <v-toolbar
+        density="compact"
+        class="toolbar-panel"
+      >
+        <v-toolbar-title class="text-body-2">
+          Tree Render
+        </v-toolbar-title>
         <span class="text-body-2 text-medium-emphasis ml-4 mr-2">Example</span>
         <v-select
           :items="examples"
           :model-value="selectedExample?.id"
-          @update:model-value="selectExample($event)"
           item-title="name"
           item-value="id"
           density="compact"
           hide-details
           variant="outlined"
           style="max-width: 200px"
+          @update:model-value="selectExample($event)"
         />
         <v-spacer />
         <!-- Theme toggle -->
@@ -108,20 +113,31 @@ async function handleFileSelect(event: Event) {
           class="mr-2"
           @click="cycleTheme"
         >
-          <v-icon start>{{ themeIcon }}</v-icon>
+          <v-icon start>
+            {{ themeIcon }}
+          </v-icon>
           {{ themeMode === 'system' ? 'System' : themeMode === 'light' ? 'Light' : 'Dark' }}
-          <v-tooltip activator="parent" location="bottom">
+          <v-tooltip
+            activator="parent"
+            location="bottom"
+          >
             Click to cycle: System → Light → Dark
           </v-tooltip>
         </v-btn>
-        <v-divider vertical class="mr-2" />
+        <v-divider
+          vertical
+          class="mr-2"
+        />
         <v-btn
           variant="outlined"
           size="small"
           class="mr-2"
           @click="handleImport"
         >
-          <v-icon start :icon="mdiImport" />
+          <v-icon
+            start
+            :icon="mdiImport"
+          />
           Import Style
         </v-btn>
         <v-btn
@@ -130,7 +146,10 @@ async function handleFileSelect(event: Event) {
           class="mr-4"
           @click="downloadStyle()"
         >
-          <v-icon start :icon="mdiExport" />
+          <v-icon
+            start
+            :icon="mdiExport"
+          />
           Export Style
         </v-btn>
         <input
@@ -139,19 +158,25 @@ async function handleFileSelect(event: Event) {
           accept=".json"
           style="display: none"
           @change="handleFileSelect"
-        />
+        >
       </v-toolbar>
 
       <!-- Main Content Area -->
       <div class="main-content">
         <!-- Left Side Panel - Style Controls -->
-        <v-sheet class="side-panel" color="surface">
+        <v-sheet
+          class="side-panel"
+          color="surface"
+        >
           <StylePanel />
         </v-sheet>
 
         <!-- Canvas Area -->
         <div class="canvas-container">
-          <TreeViewCanvas :style-config="treeStyle" :tree-data="selectedExample" />
+          <TreeViewCanvas
+            :style-config="treeStyle"
+            :tree-data="selectedExample"
+          />
         </div>
       </div>
     </div>

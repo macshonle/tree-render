@@ -92,16 +92,26 @@ const nodePadding = computed({
 </script>
 
 <template>
-  <v-expansion-panels variant="accordion" multiple :model-value="[0, 1, 2]">
+  <v-expansion-panels
+    variant="accordion"
+    multiple
+    :model-value="[0, 1, 2]"
+  >
     <!-- Node Styles Section -->
     <v-expansion-panel class="style-section">
       <v-expansion-panel-title>
-        <v-icon size="small" class="mr-2" :icon="mdiShapeOutline" />
+        <v-icon
+          size="small"
+          class="mr-2"
+          :icon="mdiShapeOutline"
+        />
         Node Style
       </v-expansion-panel-title>
       <v-expansion-panel-text>
         <div class="pa-2">
-          <div class="text-caption mb-2">Shape</div>
+          <div class="text-caption mb-2">
+            Shape
+          </div>
           <v-btn-toggle
             v-model="nodeShape"
             mandatory
@@ -115,7 +125,10 @@ const nodePadding = computed({
               size="small"
             >
               <v-icon :icon="shape.icon" />
-              <v-tooltip activator="parent" location="bottom">
+              <v-tooltip
+                activator="parent"
+                location="bottom"
+              >
                 {{ shape.label }}
               </v-tooltip>
             </v-btn>
@@ -150,12 +163,18 @@ const nodePadding = computed({
     <!-- Edge Styles Section -->
     <v-expansion-panel class="style-section">
       <v-expansion-panel-title>
-        <v-icon size="small" class="mr-2" :icon="mdiVectorLine" />
+        <v-icon
+          size="small"
+          class="mr-2"
+          :icon="mdiVectorLine"
+        />
         Edge Style
       </v-expansion-panel-title>
       <v-expansion-panel-text>
         <div class="pa-2">
-          <div class="text-caption mb-2">Connector Type</div>
+          <div class="text-caption mb-2">
+            Connector Type
+          </div>
           <v-btn-toggle
             v-model="edgeStyle"
             mandatory
@@ -169,7 +188,10 @@ const nodePadding = computed({
               size="small"
             >
               <v-icon :icon="style.icon" />
-              <v-tooltip activator="parent" location="bottom">
+              <v-tooltip
+                activator="parent"
+                location="bottom"
+              >
                 {{ style.label }}
               </v-tooltip>
             </v-btn>
@@ -192,12 +214,18 @@ const nodePadding = computed({
     <!-- Layout Section -->
     <v-expansion-panel class="style-section">
       <v-expansion-panel-title>
-        <v-icon size="small" class="mr-2" :icon="mdiArrowExpandAll" />
+        <v-icon
+          size="small"
+          class="mr-2"
+          :icon="mdiArrowExpandAll"
+        />
         Layout
       </v-expansion-panel-title>
       <v-expansion-panel-text>
         <div class="pa-2">
-          <div class="text-caption mb-2">Algorithm</div>
+          <div class="text-caption mb-2">
+            Algorithm
+          </div>
           <div class="algorithm-grid mb-3">
             <v-btn
               v-for="algo in layoutAlgorithmOptions"
@@ -256,12 +284,19 @@ const nodePadding = computed({
     >
       <template #label>
         <div class="d-flex align-center">
-          <v-icon size="small" class="mr-2" :icon="mdiBug" />
+          <v-icon
+            size="small"
+            class="mr-2"
+            :icon="mdiBug"
+          />
           <span class="text-caption">Debug Contours</span>
         </div>
       </template>
     </v-checkbox>
-    <div v-if="debugEnabled" class="mt-2 ml-8">
+    <div
+      v-if="debugEnabled"
+      class="mt-2 ml-8"
+    >
       <div class="text-caption text-medium-emphasis mb-2">
         Click nodes or edges to see contours
       </div>
@@ -276,7 +311,10 @@ const nodePadding = computed({
       block
       @click="resetStyle(); resetView()"
     >
-      <v-icon start :icon="mdiRefresh" />
+      <v-icon
+        start
+        :icon="mdiRefresh"
+      />
       Reset to Defaults
     </v-btn>
   </div>

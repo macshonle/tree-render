@@ -1238,14 +1238,26 @@ onUnmounted(() => {
 
     <!-- Zoom controls overlay -->
     <div class="zoom-controls">
-      <v-btn-group density="compact" variant="outlined">
-        <v-btn size="small" @click="zoomIn">
+      <v-btn-group
+        density="compact"
+        variant="outlined"
+      >
+        <v-btn
+          size="small"
+          @click="zoomIn"
+        >
           <v-icon :icon="mdiPlus" />
         </v-btn>
-        <v-btn size="small" @click="resetView">
+        <v-btn
+          size="small"
+          @click="resetView"
+        >
           <span class="text-caption">{{ Math.round(zoom * 100) }}%</span>
         </v-btn>
-        <v-btn size="small" @click="zoomOut">
+        <v-btn
+          size="small"
+          @click="zoomOut"
+        >
           <v-icon :icon="mdiMinus" />
         </v-btn>
       </v-btn-group>
