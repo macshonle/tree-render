@@ -287,10 +287,29 @@ function calculateRLPositions(
 /**
  * Redistribute gaps across siblings (apportionment).
  *
- * Calculates current gaps between adjacent siblings, computes
- * average gaps for leaf and non-leaf pairs, and redistributes
- * positions so gaps move toward their group average while
- * respecting per-pair minimum gaps.
+ * After LR/RL averaging, siblings may have uneven gaps due to contour-based
+ * placement. This function redistributes positions so gaps move toward a
+ * uniform average, creating a more visually balanced layout.
+ *
+ * The algorithm:
+ * 1. Calculate actual gaps between each pair of adjacent siblings using contours
+ * 2. Separate gaps into two groups: leaf-leaf pairs and pairs involving non-leaves
+ * 3. Compute the average gap for each group independently
+ * 4. Redistribute positions so each gap moves toward its group's average
+ * 5. Ensure no gap falls below the minimum (horizontalGap or horizontalGap/2 for leaves)
+ *
+ * Why separate averages for leaf vs non-leaf pairs?
+ * When `reduceLeafSiblingGaps` is enabled, leaf siblings use half the normal gap.
+ * Averaging them separately ensures leaf pairs stay compact while non-leaf pairs
+ * maintain their larger spacing, preventing the reduced leaf gaps from pulling
+ * non-leaf gaps down (or vice versa).
+ *
+ * @param positions - Current x positions of children (after LR/RL averaging)
+ * @param children - The laid out child subtrees
+ * @param childOffsetYs - Y offsets for each child
+ * @param gapForIndex - Function returning minimum gap for a pair of siblings
+ * @param isLeafSiblingPair - Function to check if both siblings are leaves
+ * @returns New positions with redistributed gaps
  */
 function apportionGaps(
   positions: number[],

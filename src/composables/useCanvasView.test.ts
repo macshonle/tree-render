@@ -547,3 +547,58 @@ describe('useCanvasView - invariant tests', () => {
     expect(storeB.getZoom()).toBe(1)
   })
 })
+
+describe('useCanvasView - LRU cache cleanup', () => {
+  it('prunes old view states when exceeding cache limit', () => {
+    const store = createCanvasViewStore()
+    const { setCurrentExample, setPanOffset, getPanOffset } = store
+
+    // Create many examples (more than the 50 limit)
+    for (let i = 0; i < 60; i++) {
+      setCurrentExample(`example-${i}`)
+      setPanOffset(i, i)
+    }
+
+    // Recent examples should still have their state
+    setCurrentExample('example-59')
+    expect(getPanOffset()).toEqual({ x: 59, y: 59 })
+
+    setCurrentExample('example-55')
+    expect(getPanOffset()).toEqual({ x: 55, y: 55 })
+
+    // Old examples (first 10) should have been pruned and reset to defaults
+    setCurrentExample('example-0')
+    expect(getPanOffset()).toEqual({ x: 0, y: 0 })
+  })
+
+  it('LRU keeps recently accessed examples even if created early', () => {
+    const store = createCanvasViewStore()
+    const { setCurrentExample, setPanOffset, getPanOffset } = store
+
+    // Create initial example
+    setCurrentExample('keep-me')
+    setPanOffset(999, 888)
+
+    // Create examples up to just under the limit (50)
+    // We have 'keep-me' + 48 fillers = 49 entries
+    for (let i = 0; i < 48; i++) {
+      setCurrentExample(`filler-${i}`)
+      setPanOffset(i, i)
+    }
+
+    // Re-access 'keep-me' to move it to end of LRU before pruning starts
+    setCurrentExample('keep-me')
+    expect(getPanOffset()).toEqual({ x: 999, y: 888 })
+
+    // Now create more examples to trigger pruning
+    // The old fillers should be pruned, but 'keep-me' should survive
+    for (let i = 48; i < 70; i++) {
+      setCurrentExample(`filler-${i}`)
+      setPanOffset(i, i)
+    }
+
+    // 'keep-me' should still be preserved (was recently accessed before pruning started)
+    setCurrentExample('keep-me')
+    expect(getPanOffset()).toEqual({ x: 999, y: 888 })
+  })
+})

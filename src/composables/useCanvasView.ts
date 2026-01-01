@@ -44,12 +44,43 @@ function createDefaultViewState(): ViewState {
   }
 }
 
+// Maximum number of view states to cache before pruning old entries
+const MAX_CACHED_VIEW_STATES = 50
+
 export function createCanvasViewStore(): CanvasViewStore {
   // Store view state per example ID
   const viewStates = reactive<Record<string, ViewState>>({})
 
+  // Track access order for LRU-style cleanup (most recent last)
+  const accessOrder: string[] = []
+
   // Current example ID being viewed
   const currentExampleId = ref<string>('')
+
+  /**
+   * Update access order for LRU tracking.
+   * Moves the given ID to the end (most recently used).
+   */
+  function touchAccessOrder(id: string) {
+    const existingIndex = accessOrder.indexOf(id)
+    if (existingIndex !== -1) {
+      accessOrder.splice(existingIndex, 1)
+    }
+    accessOrder.push(id)
+  }
+
+  /**
+   * Prune oldest view states if we exceed the cache limit.
+   * Removes least recently used entries first.
+   */
+  function pruneOldViewStates() {
+    while (accessOrder.length > MAX_CACHED_VIEW_STATES) {
+      const oldestId = accessOrder.shift()
+      if (oldestId && oldestId !== currentExampleId.value) {
+        delete viewStates[oldestId]
+      }
+    }
+  }
 
   // Get or create view state for current example
   function getCurrentViewState(): ViewState {
@@ -72,11 +103,16 @@ export function createCanvasViewStore(): CanvasViewStore {
   /**
    * Set the current example ID. Called when switching examples.
    * Each example maintains its own independent view state.
+   * Uses LRU-style cleanup to prevent unbounded memory growth.
    */
   function setCurrentExample(exampleId: string) {
     currentExampleId.value = exampleId
-    if (exampleId && !viewStates[exampleId]) {
-      viewStates[exampleId] = createDefaultViewState()
+    if (exampleId) {
+      touchAccessOrder(exampleId)
+      if (!viewStates[exampleId]) {
+        viewStates[exampleId] = createDefaultViewState()
+      }
+      pruneOldViewStates()
     }
   }
 

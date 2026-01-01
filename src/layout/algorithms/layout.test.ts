@@ -230,6 +230,55 @@ describe('boundingBoxLayout', () => {
         (result.root.children[0].x + result.root.children[0].width / 2)
       expect(gap).toBeCloseTo(20, 0)
     })
+
+    it('maintains full gap between non-leaf siblings when reduceLeafSiblingGaps is enabled', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'bounding-box', horizontalGap: 40, verticalGap: 40, reduceLeafSiblingGaps: true },
+      })
+      const parent = node('Parent')
+      // Both children have their own children, so they're not leaves
+      const child1 = node('A', [node('A1')])
+      const child2 = node('B', [node('B1')])
+      const laidOutChildren = layoutChildren([child1, child2], context, boundingBoxLayout)
+
+      const result = boundingBoxLayout(parent, laidOutChildren, context)
+
+      // Gap between non-leaf siblings should be full horizontalGap (40), not reduced
+      const gap =
+        result.root.children[1].x -
+        result.root.children[1].width / 2 -
+        (result.root.children[0].x + result.root.children[0].width / 2)
+      expect(gap).toBeGreaterThanOrEqual(40 - 1)
+    })
+
+    it('uses mixed gaps for mixed leaf/non-leaf siblings', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'bounding-box', horizontalGap: 40, verticalGap: 40, reduceLeafSiblingGaps: true },
+      })
+      const parent = node('Parent')
+      // Mix: leaf, non-leaf, leaf
+      const child1 = node('A')                    // leaf
+      const child2 = node('B', [node('B1')])      // non-leaf
+      const child3 = node('C')                    // leaf
+      const laidOutChildren = layoutChildren([child1, child2, child3], context, boundingBoxLayout)
+
+      const result = boundingBoxLayout(parent, laidOutChildren, context)
+
+      // Gap between A (leaf) and B (non-leaf) should be full gap
+      const gapAB =
+        result.root.children[1].x -
+        result.root.children[1].width / 2 -
+        (result.root.children[0].x + result.root.children[0].width / 2)
+
+      // Gap between B (non-leaf) and C (leaf) should be full gap
+      const gapBC =
+        result.root.children[2].x -
+        result.root.children[2].width / 2 -
+        (result.root.children[1].x + result.root.children[1].width / 2)
+
+      expect(gapAB).toBeGreaterThanOrEqual(40 - 1)
+      expect(gapBC).toBeGreaterThanOrEqual(40 - 1)
+    })
   })
 
   describe('nested tree (3 levels)', () => {
@@ -554,6 +603,78 @@ describe('tidyLayout', () => {
         result.root.children[1].width / 2 -
         (result.root.children[0].x + result.root.children[0].width / 2)
       expect(gap).toBeCloseTo(20, 1)
+    })
+
+    it('maintains full gap between non-leaf siblings when reduceLeafSiblingGaps is enabled', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'tidy', horizontalGap: 40, verticalGap: 40, reduceLeafSiblingGaps: true },
+      })
+      const parent = node('Parent')
+      // Both children have their own children, so they're not leaves
+      const child1 = node('A', [node('A1')])
+      const child2 = node('B', [node('B1')])
+      const laidOutChildren = layoutChildren([child1, child2], context, tidyLayout)
+
+      const result = tidyLayout(parent, laidOutChildren, context)
+
+      // Gap between non-leaf siblings should be at least full horizontalGap (40)
+      const gap =
+        result.root.children[1].x -
+        result.root.children[1].width / 2 -
+        (result.root.children[0].x + result.root.children[0].width / 2)
+      expect(gap).toBeGreaterThanOrEqual(40 - 1)
+    })
+
+    it('uses mixed gaps for mixed leaf/non-leaf siblings', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'tidy', horizontalGap: 40, verticalGap: 40, reduceLeafSiblingGaps: true },
+      })
+      const parent = node('Parent')
+      // Mix: leaf, non-leaf, leaf
+      const child1 = node('A')                    // leaf
+      const child2 = node('B', [node('B1')])      // non-leaf
+      const child3 = node('C')                    // leaf
+      const laidOutChildren = layoutChildren([child1, child2, child3], context, tidyLayout)
+
+      const result = tidyLayout(parent, laidOutChildren, context)
+
+      // Gap between A (leaf) and B (non-leaf) should be at least full gap
+      const gapAB =
+        result.root.children[1].x -
+        result.root.children[1].width / 2 -
+        (result.root.children[0].x + result.root.children[0].width / 2)
+
+      // Gap between B (non-leaf) and C (leaf) should be at least full gap
+      const gapBC =
+        result.root.children[2].x -
+        result.root.children[2].width / 2 -
+        (result.root.children[1].x + result.root.children[1].width / 2)
+
+      expect(gapAB).toBeGreaterThanOrEqual(40 - 1)
+      expect(gapBC).toBeGreaterThanOrEqual(40 - 1)
+    })
+
+    it('reduces gaps for consecutive leaf siblings in a larger group', () => {
+      const context = createMockContext({
+        layout: { algorithm: 'tidy', horizontalGap: 40, verticalGap: 40, reduceLeafSiblingGaps: true },
+      })
+      const parent = node('Parent')
+      // All leaves: A, B, C, D
+      const children = [node('A'), node('B'), node('C'), node('D')]
+      const laidOutChildren = layoutChildren(children, context, tidyLayout)
+
+      const result = tidyLayout(parent, laidOutChildren, context)
+
+      // All gaps between consecutive leaves should be reduced (close to 20)
+      for (let i = 0; i < result.root.children.length - 1; i++) {
+        const gap =
+          result.root.children[i + 1].x -
+          result.root.children[i + 1].width / 2 -
+          (result.root.children[i].x + result.root.children[i].width / 2)
+        // With apportionment, gaps may vary slightly but should be around 20
+        expect(gap).toBeGreaterThanOrEqual(20 - 1)
+        expect(gap).toBeLessThanOrEqual(25)
+      }
     })
   })
 

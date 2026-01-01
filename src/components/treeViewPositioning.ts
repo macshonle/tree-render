@@ -1,5 +1,6 @@
 export interface RootPositionOptions {
-  horizontalGap: number
+  /** Margin between canvas edge and tree content */
+  canvasMargin: number
   panOffset: { x: number; y: number }
   layoutRootX: number
   layoutRootY: number
@@ -21,9 +22,18 @@ export interface RootPositionResult {
   didAdjust: boolean
 }
 
+/**
+ * Calculate pan offset adjustments to preserve root screen position when switching
+ * layout algorithms.
+ *
+ * When a user has panned/zoomed the view and then switches algorithms, the tree's
+ * root node may move to a different position. This function calculates the pan
+ * adjustment needed to keep the root at its previous screen position, providing
+ * a stable visual experience.
+ */
 export function preserveRootPosition(options: RootPositionOptions): RootPositionResult {
   const {
-    horizontalGap,
+    canvasMargin,
     panOffset,
     layoutRootX,
     layoutRootY,
@@ -38,8 +48,8 @@ export function preserveRootPosition(options: RootPositionOptions): RootPosition
     minPanAdjust = 0.5,
   } = options
 
-  const newRootScreenX = horizontalGap + panOffset.x + (layoutRootX + offsetX) * zoom
-  const newRootScreenY = horizontalGap + panOffset.y + (layoutRootY + offsetY) * zoom
+  const newRootScreenX = canvasMargin + panOffset.x + (layoutRootX + offsetX) * zoom
+  const newRootScreenY = canvasMargin + panOffset.y + (layoutRootY + offsetY) * zoom
 
   let adjustedPan = panOffset
   let didAdjust = false
@@ -63,8 +73,8 @@ export function preserveRootPosition(options: RootPositionOptions): RootPosition
     }
   }
 
-  const rootScreenX = horizontalGap + adjustedPan.x + (layoutRootX + offsetX) * zoom
-  const rootScreenY = horizontalGap + adjustedPan.y + (layoutRootY + offsetY) * zoom
+  const rootScreenX = canvasMargin + adjustedPan.x + (layoutRootX + offsetX) * zoom
+  const rootScreenY = canvasMargin + adjustedPan.y + (layoutRootY + offsetY) * zoom
 
   return {
     panOffset: adjustedPan,

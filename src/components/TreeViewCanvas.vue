@@ -168,7 +168,7 @@ function draw() {
 
   const algorithmChanged = previousLayoutAlgorithm !== null && previousLayoutAlgorithm !== currentAlgorithm
   const rootPosition = preserveRootPosition({
-    horizontalGap,
+    canvasMargin: horizontalGap,
     panOffset,
     layoutRootX: layoutRoot.x,
     layoutRootY: layoutRoot.y,
