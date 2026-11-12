@@ -70,18 +70,6 @@ export interface TextMeasurer {
 }
 
 /**
- * Switches shared by all layout algorithms.
- */
-export interface LayoutOptions {
-  /**
-   * Attach a polygon contour to every node, for the debug overlay.
-   * Building them costs far more than the layout itself, so leave this off
-   * when the overlay is not showing.
-   */
-  contours?: boolean
-}
-
-/**
  * Context passed to layout algorithms containing all necessary configuration
  */
 export interface LayoutContext {
@@ -93,6 +81,4 @@ export interface LayoutContext {
   layout: TreeStyle['layout']
   /** Node padding from style */
   padding: number
-  /** Edge style (for edge-aware contour building) */
-  edgeStyle: EdgeStyle
 }

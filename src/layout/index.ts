@@ -1,19 +1,16 @@
 import type { TreeNode, LayoutNode, TreeStyle, TreeExample, LayoutAlgorithmType } from '@/types'
-import type { LayoutContext, LayoutOptions, TextMeasurer } from './types'
+import type { LayoutContext, TextMeasurer } from './types'
 import { boundingBoxLayout } from './algorithms/boundingBox'
 import { tidyLayout } from './algorithms/tidy'
 
 // Re-export types for convenience
-export type { LayoutContext, LayoutOptions, TextMeasurer, TextMeasurement } from './types'
+export type { LayoutContext, TextMeasurer, TextMeasurement } from './types'
 
 /**
  * Registry of available layout algorithms. Each lays out a whole tree and
  * returns the positioned root.
  */
-const algorithms: Record<
-  LayoutAlgorithmType,
-  (root: TreeNode, context: LayoutContext, options: LayoutOptions) => LayoutNode
-> = {
+const algorithms: Record<LayoutAlgorithmType, (root: TreeNode, context: LayoutContext) => LayoutNode> = {
   'bounding-box': boundingBoxLayout,
   'tidy': tidyLayout,
 }
@@ -49,27 +46,22 @@ export function createCanvasTextMeasurer(ctx: CanvasRenderingContext2D): TextMea
  * @param treeData - Tree example metadata (for sizing mode, fixed dimensions)
  * @param style - Style configuration including layout settings
  * @param measureText - Text measurer (typically created from canvas context)
- * @param options - Optional switches. Contours are attached unless `contours` is false;
- *                  they are only needed by the debug overlay and are costly to build.
  * @returns Positioned LayoutNode tree
  */
 export function layoutTree(
   root: TreeNode,
   treeData: TreeExample,
   style: TreeStyle,
-  measureText: TextMeasurer,
-  options: LayoutOptions = {}
+  measureText: TextMeasurer
 ): LayoutNode {
   const context: LayoutContext = {
     measureText,
     treeData,
     layout: style.layout,
     padding: style.node.padding,
-    edgeStyle: style.edge.style,
   }
 
-  const algorithm = algorithms[style.layout.algorithm]
-  return algorithm(root, context, { contours: options.contours !== false })
+  return algorithms[style.layout.algorithm](root, context)
 }
 
 /**

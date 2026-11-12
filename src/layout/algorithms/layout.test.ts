@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { boundingBoxLayout as boundingBoxTreeLayout } from './boundingBox'
 import { tidyLayout as tidyTreeLayout } from './tidy'
+import { subtreeContour } from '../contour'
 import type { TreeNode, TreeExample, LayoutNode } from '@/types'
-import type { LayoutContext, LayoutOptions, TextMeasurer, YMonotonePolygon } from '../types'
+import type { LayoutContext, TextMeasurer, YMonotonePolygon } from '../types'
 
 /** What these tests get back for a subtree: the positioned root, the box around every node, and the contour. */
 interface LayoutResult {
@@ -20,20 +21,18 @@ interface LaidOutChild {
 type LayoutAlgorithm = (node: TreeNode, children: LaidOutChild[], context: LayoutContext) => LayoutResult
 
 /**
- * The layout algorithms work on a whole tree at once. These tests were
- * written for a per-node shape: lay the children out, then hand them to the
- * parent, and get back the positioned root together with its bounds and
- * contour. This presents a whole-tree algorithm in that shape so the tests
- * can stay as they are. Only the tree structure is taken from `children`
- * (many tests pass a bare parent plus separately prepared children); their
- * layouts are recomputed.
+ * The layout algorithms work on a whole tree at once and return positions
+ * only. These tests were written for a per-node shape: lay the children out,
+ * then hand them to the parent, and get back the positioned root together
+ * with its bounds and contour. This presents a whole-tree algorithm in that
+ * shape so the tests can stay as they are. Only the tree structure is taken
+ * from `children` (many tests pass a bare parent plus separately prepared
+ * children); their layouts are recomputed.
  */
-function perNode(
-  layout: (root: TreeNode, context: LayoutContext, options: LayoutOptions) => LayoutNode
-): LayoutAlgorithm {
+function perNode(layout: (root: TreeNode, context: LayoutContext) => LayoutNode): LayoutAlgorithm {
   return (node, children, context) => {
     const tree: TreeNode = children.length > 0 ? { ...node, children: children.map((c) => c.node) } : node
-    const root = layout(tree, context, { contours: true })
+    const root = layout(tree, context)
     const bounds = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity }
     const collect = (n: LayoutNode) => {
       bounds.left = Math.min(bounds.left, n.x - n.width / 2)
@@ -43,7 +42,7 @@ function perNode(
       n.children.forEach(collect)
     }
     collect(root)
-    return { root, bounds, polygonContour: root.polygonContour! }
+    return { root, bounds, polygonContour: subtreeContour(root, 'org-chart') }
   }
 }
 
@@ -93,7 +92,6 @@ function createMockContext(overrides: Partial<LayoutContext> = {}): LayoutContex
       reduceLeafSiblingGaps: false,
     },
     padding: 10,
-    edgeStyle: 'org-chart',
     ...overrides,
   }
 }
@@ -423,17 +421,18 @@ describe('polygon contour correctness', () => {
     expect(contourBottomY).toBeCloseTo(childBottom, 1)
   })
 
-  it('polygon contour is attached to layout nodes', () => {
+  it('a polygon contour can be built for every layout node', () => {
     const context = createMockContext()
     const tree = node('Root', [node('A'), node('B')])
     const laidOutChildren = layoutChildren(tree.children!, context, boundingBoxLayout)
 
     const result = boundingBoxLayout(tree, laidOutChildren, context)
 
-    // Root should have polygon contour
-    expect(result.root.polygonContour).toBeDefined()
-    expect(result.root.polygonContour!.left.length).toBeGreaterThan(0)
-    expect(result.root.polygonContour!.right.length).toBeGreaterThan(0)
+    for (const layoutNode of [result.root, ...result.root.children]) {
+      const contour = subtreeContour(layoutNode, 'org-chart')
+      expect(contour.left.length).toBeGreaterThan(0)
+      expect(contour.right.length).toBeGreaterThan(0)
+    }
   })
 })
 
@@ -1053,16 +1052,18 @@ describe('tidyLayout', () => {
       expect(contourBottomY).toBeCloseTo(childBottom, 1)
     })
 
-    it('polygon contour is attached to layout nodes', () => {
+    it('a polygon contour can be built for every layout node', () => {
       const context = createMockContext()
       const tree = node('Root', [node('A'), node('B')])
       const laidOutChildren = layoutChildren(tree.children!, context, tidyLayout)
 
       const result = tidyLayout(tree, laidOutChildren, context)
 
-      expect(result.root.polygonContour).toBeDefined()
-      expect(result.root.polygonContour!.left.length).toBeGreaterThan(0)
-      expect(result.root.polygonContour!.right.length).toBeGreaterThan(0)
+      for (const layoutNode of [result.root, ...result.root.children]) {
+        const contour = subtreeContour(layoutNode, 'org-chart')
+        expect(contour.left.length).toBeGreaterThan(0)
+        expect(contour.right.length).toBeGreaterThan(0)
+      }
     })
   })
 })

@@ -1,7 +1,6 @@
 import type { TreeNode, LayoutNode } from '@/types'
-import type { LayoutContext, LayoutOptions } from '../types'
+import type { LayoutContext } from '../types'
 import { calculateNodeSize } from '../utils'
-import { attachContours } from '../contour'
 import { tidyTree } from '@/tidy-tree/tidy-tree'
 import type { TidyNode } from '@/tidy-tree/tidy-tree'
 
@@ -22,15 +21,9 @@ import type { TidyNode } from '@/tidy-tree/tidy-tree'
  * lays out the whole tree at once and converts the result to the app's
  * LayoutNode shape (centre coordinates, root at the origin).
  *
- * Spacing is measured between node boxes, not between polygon contours. The
- * contours attached here are outlines of each finished subtree and its
- * connectors, built after the fact; the layout does not consult them.
+ * Spacing is measured between node boxes, not between polygon contours.
  */
-export function tidyLayout(
-  root: TreeNode,
-  context: LayoutContext,
-  options: LayoutOptions = {}
-): LayoutNode {
+export function tidyLayout(root: TreeNode, context: LayoutContext): LayoutNode {
   const { horizontalGap, verticalGap, reduceLeafSiblingGaps } = context.layout
   const isLeaf = (n: TidyNode<TreeNode>) => n.children.length === 0
 
@@ -58,8 +51,6 @@ export function tidyLayout(
   for (let i = 0, next = 1; i < nodes.length; i++) {
     for (let k = 0; k < tree.nodes[i].children.length; k++) nodes[i].children.push(nodes[next++])
   }
-
-  if (options.contours) attachContours(nodes, context.edgeStyle)
 
   return nodes[0]
 }

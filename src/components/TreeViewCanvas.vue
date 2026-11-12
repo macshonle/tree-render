@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { mdiPlus, mdiMinus } from '@mdi/js'
 import type { TreeStyle, TreeExample, LayoutNode, YMonotonePolygon, ContourPoint } from '@/types'
 import { layoutTree, createCanvasTextMeasurer } from '@/layout'
+import { subtreeContour } from '@/layout/contour'
 import { useDebugMode } from '@/composables/useDebugMode'
 import { useCanvasView } from '@/composables/useCanvasView'
 import { preserveRootPosition } from '@/components/treeViewPositioning'
@@ -133,11 +134,7 @@ function draw() {
 
   // Calculate tree layout using the selected algorithm
   const textMeasurer = createCanvasTextMeasurer(ctx)
-  // Contours are only drawn by the debug overlay, and only for a selection.
-  // They cost far more to build than the layout, so skip them otherwise.
-  const layoutRoot = layoutTree(props.treeData.root, props.treeData, props.styleConfig, textMeasurer, {
-    contours: debugMode.value && selection.value !== null,
-  })
+  const layoutRoot = layoutTree(props.treeData.root, props.treeData, props.styleConfig, textMeasurer)
 
   // Calculate tree bounds (for positioning)
   let minX = Infinity
@@ -339,7 +336,7 @@ function draw() {
 
   // Draw contours if debug mode is enabled and something is selected
   if (debugMode.value && selection.value) {
-    drawDebugContours(ctx!, layoutRoot, offsetX, offsetY, selection.value)
+    drawDebugContours(ctx!, layoutRoot, offsetX, offsetY, selection.value, edgeStyle.style)
   }
 
   ctx.restore()
@@ -347,20 +344,25 @@ function draw() {
 
 /**
  * Draw debug contours for the selected node or edge.
+ *
+ * A contour is worked out here, for the one or two subtrees being outlined,
+ * rather than for every node of the layout.
  */
 function drawDebugContours(
   ctx: CanvasRenderingContext2D,
   root: LayoutNode,
   offsetX: number,
   offsetY: number,
-  sel: { type: 'node'; nodeId: string } | { type: 'edge'; parentId: string; childId: string; childIndex: number }
+  sel: { type: 'node'; nodeId: string } | { type: 'edge'; parentId: string; childId: string; childIndex: number },
+  edgeStyle: TreeStyle['edge']['style']
 ) {
   if (sel.type === 'node') {
     // Find the node and draw its contour
     const node = findNodeById(root, sel.nodeId)
-    if (node?.polygonContour) {
-      drawPolygonContour(ctx, node.polygonContour, node.x + offsetX, node.y + offsetY, 'left', 'rgba(0, 180, 0, 0.9)')
-      drawPolygonContour(ctx, node.polygonContour, node.x + offsetX, node.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
+    if (node) {
+      const contour = subtreeContour(node, edgeStyle)
+      drawPolygonContour(ctx, contour, node.x + offsetX, node.y + offsetY, 'left', 'rgba(0, 180, 0, 0.9)')
+      drawPolygonContour(ctx, contour, node.x + offsetX, node.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
     }
   } else {
     // Find the parent node
@@ -377,22 +379,22 @@ function drawDebugContours(
     // Left boundary (red): immediate left sibling, or walk up to find ancestor with left sibling
     if (childIndex > 0) {
       const leftChild = children[childIndex - 1]
-      if (leftChild?.polygonContour) {
-        drawPolygonContour(ctx, leftChild.polygonContour, leftChild.x + offsetX, leftChild.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
+      if (leftChild) {
+        drawPolygonContour(ctx, subtreeContour(leftChild, edgeStyle), leftChild.x + offsetX, leftChild.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
       }
     } else if (childIndex === 0) {
       // No immediate left sibling - find ancestor's left sibling
       const ancestorLeftSibling = findAncestorLeftSibling(root, sel.parentId)
-      if (ancestorLeftSibling?.polygonContour) {
-        drawPolygonContour(ctx, ancestorLeftSibling.polygonContour, ancestorLeftSibling.x + offsetX, ancestorLeftSibling.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
+      if (ancestorLeftSibling) {
+        drawPolygonContour(ctx, subtreeContour(ancestorLeftSibling, edgeStyle), ancestorLeftSibling.x + offsetX, ancestorLeftSibling.y + offsetY, 'right', 'rgba(220, 0, 0, 0.9)')
       }
     }
 
     // Right boundary (green): the selected child's left contour
     if (childIndex < children.length) {
       const rightChild = children[childIndex]
-      if (rightChild?.polygonContour) {
-        drawPolygonContour(ctx, rightChild.polygonContour, rightChild.x + offsetX, rightChild.y + offsetY, 'left', 'rgba(0, 180, 0, 0.9)')
+      if (rightChild) {
+        drawPolygonContour(ctx, subtreeContour(rightChild, edgeStyle), rightChild.x + offsetX, rightChild.y + offsetY, 'left', 'rgba(0, 180, 0, 0.9)')
       }
     }
   }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { layoutTree } from './index'
+import { subtreeContour } from './contour'
 import type { TreeNode, TreeStyle, TreeExample, LayoutNode } from '@/types'
 import type { TextMeasurer } from './types'
 
@@ -191,16 +192,16 @@ describe('layoutTree integration', () => {
     expect(result.children[0].height).toBe(40)
   })
 
-  it('includes polygon contour in result', () => {
+  it('returns a layout that a polygon contour can be built from', () => {
     const root = node('Root', [node('Child')])
     const style = createTestStyle()
     const treeData = createTestTreeData(root)
 
     const result = layoutTree(root, treeData, style, measurer)
+    const contour = subtreeContour(result, style.edge.style)
 
-    expect(result.polygonContour).toBeDefined()
-    expect(result.polygonContour!.left.length).toBeGreaterThan(0)
-    expect(result.polygonContour!.right.length).toBeGreaterThan(0)
+    expect(contour.left.length).toBeGreaterThan(0)
+    expect(contour.right.length).toBeGreaterThan(0)
   })
 
   it('respects horizontalGap setting', () => {
@@ -230,7 +231,7 @@ describe('layoutTree integration', () => {
   })
 })
 
-describe('layoutTree scaling and optional contours', () => {
+describe('layoutTree scaling', () => {
   const measurer = createMockTextMeasurer()
   const all = (n: LayoutNode): LayoutNode[] => {
     // Iterative: these trees are far too deep to walk recursively.
@@ -254,15 +255,18 @@ describe('layoutTree scaling and optional contours', () => {
         tip = next
       }
 
-      const result = layoutTree(root, createTestTreeData(root), createTestStyle({ algorithm }), measurer, {
-        contours: false,
-      })
+      const result = layoutTree(root, createTestTreeData(root), createTestStyle({ algorithm }), measurer)
 
       const nodes = all(result)
       expect(nodes).toHaveLength(50_000)
       expect(nodes.every((n) => n.x === 0)).toBe(true)
       // Each level is one node height plus one vertical gap further down.
       expect(nodes[nodes.length - 1].y).toBe(49_999 * (20 + 40))
+
+      // Outlining the whole tree for the debug overlay keeps up.
+      const contour = subtreeContour(result, 'org-chart')
+      expect(contour.left).toHaveLength(100_000)
+      expect(contour.left[99_999]).toEqual({ x: -20, y: 49_999 * (20 + 40) + 10 })
     })
 
     it(`${algorithm}: lays out 50,000 nodes in a bushy tree`, () => {
@@ -275,26 +279,17 @@ describe('layoutTree scaling and optional contours', () => {
         pool.push(child)
       }
 
-      const result = layoutTree(root, createTestTreeData(root), createTestStyle({ algorithm }), measurer, {
-        contours: false,
-      })
+      const result = layoutTree(root, createTestTreeData(root), createTestStyle({ algorithm }), measurer)
 
       const nodes = all(result)
       expect(nodes).toHaveLength(50_000)
       expect(nodes.every((n) => Number.isFinite(n.x) && Number.isFinite(n.y))).toBe(true)
-    })
 
-    it(`${algorithm}: contours are optional and do not affect positions`, () => {
-      const root = node('Root', [node('A', [node('A1'), node('A2')]), node('B', [node('B1')])])
-      const treeData = createTestTreeData(root)
-      const style = createTestStyle({ algorithm })
-
-      const withContours = all(layoutTree(root, treeData, style, measurer))
-      const without = all(layoutTree(root, treeData, style, measurer, { contours: false }))
-
-      expect(withContours.every((n) => n.polygonContour !== undefined)).toBe(true)
-      expect(without.every((n) => n.polygonContour === undefined)).toBe(true)
-      expect(without.map((n) => [n.id, n.x, n.y])).toEqual(withContours.map((n) => [n.id, n.x, n.y]))
+      // Outlining the whole tree for the debug overlay keeps up.
+      const contour = subtreeContour(result, 'org-chart')
+      const deepest = nodes.reduce((y, n) => Math.max(y, n.y + n.height / 2), -Infinity)
+      expect(contour.left[contour.left.length - 1].y).toBeCloseTo(deepest, 6)
+      expect(contour.right[contour.right.length - 1].y).toBeCloseTo(deepest, 6)
     })
   }
 })
@@ -361,30 +356,28 @@ describe('layoutTree with the tidy algorithm', () => {
     expect(gapBetween(reduced.children[1], reduced.children[2])).toBe(20)
   })
 
-  it('attaches contours to every node unless told not to', () => {
+  it('gives every node a subtree a contour can be built for', () => {
     const root = node('Root', [node('A', [node('A1'), node('A2')]), node('B')])
     const treeData = createTestTreeData(root)
     const style = createTestStyle({ algorithm: 'tidy' })
     const all = (n: LayoutNode): LayoutNode[] => [n, ...n.children.flatMap(all)]
 
-    const withContours = layoutTree(root, treeData, style, measurer)
-    for (const n of all(withContours)) {
-      expect(n.polygonContour).toBeDefined()
+    const result = layoutTree(root, treeData, style, measurer)
+    const boxes = all(result)
+    for (const n of boxes) {
+      const contour = subtreeContour(n, style.edge.style)
       // A contour is relative to its own node and starts at the node's top corners.
-      expect(n.polygonContour!.left[0]).toEqual({ x: -n.width / 2, y: -n.height / 2 })
-      expect(n.polygonContour!.right[0]).toEqual({ x: n.width / 2, y: -n.height / 2 })
+      expect(contour.left[0]).toEqual({ x: -n.width / 2, y: -n.height / 2 })
+      expect(contour.right[0]).toEqual({ x: n.width / 2, y: -n.height / 2 })
     }
     // The root's contour reaches down to the deepest node and out to the widest.
-    const boxes = all(withContours)
-    const points = [...withContours.polygonContour!.left, ...withContours.polygonContour!.right]
+    const whole = subtreeContour(result, style.edge.style)
+    const points = [...whole.left, ...whole.right]
     expect(Math.max(...points.map((p) => p.y))).toBeCloseTo(Math.max(...boxes.map((b) => b.y + b.height / 2)), 6)
     expect(Math.min(...points.map((p) => p.x))).toBeCloseTo(Math.min(...boxes.map((b) => b.x - b.width / 2)), 6)
     expect(Math.max(...points.map((p) => p.x))).toBeCloseTo(Math.max(...boxes.map((b) => b.x + b.width / 2)), 6)
-
-    const without = layoutTree(root, treeData, style, measurer, { contours: false })
-    for (const n of all(without)) expect(n.polygonContour).toBeUndefined()
-    // Contours do not affect positions.
-    expect(all(without).map((n) => [n.x, n.y])).toEqual(all(withContours).map((n) => [n.x, n.y]))
+    // Building contours leaves the layout as it was.
+    expect(all(layoutTree(root, treeData, style, measurer))).toEqual(boxes)
   })
 
   it('keeps deep subtrees apart when shallow siblings sit between them', () => {
@@ -404,3 +397,85 @@ describe('layoutTree with the tidy algorithm', () => {
     expect(countOverlaps(result)).toBe(0)
   })
 })
+
+describe('subtreeContour on laid-out trees', () => {
+  const measurer = createMockTextMeasurer()
+  type Side = { x: number; y: number }[]
+
+  /** The outermost x a side has at height y, or null if it does not reach that height. */
+  function sideAt(side: Side, y: number, outer: (a: number, b: number) => number): number | null {
+    let best: number | null = null
+    for (let i = 0; i + 1 < side.length; i++) {
+      const p = side[i]
+      const q = side[i + 1]
+      if (y < p.y || y > q.y) continue
+      const x = q.y === p.y ? outer(p.x, q.x) : p.x + ((y - p.y) / (q.y - p.y)) * (q.x - p.x)
+      best = best === null ? x : outer(best, x)
+    }
+    return best
+  }
+
+  const all = (n: LayoutNode): LayoutNode[] => [n, ...n.children.flatMap(all)]
+
+  it('runs top to bottom and encloses every node, for every subtree, layout and edge style', () => {
+    let seed = 20240
+    const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296
+    let checked = 0
+    const problems: string[] = []
+
+    for (let t = 0; t < 40; t++) {
+      const size = 2 + Math.floor(random() * 50)
+      const spread = [0.5, 1, 2][t % 3]
+      const make = (i: number): TreeNode => ({
+        id: `n${i}`,
+        label: '',
+        width: 20 + Math.floor(random() * 12) * 5,
+        height: 15 + Math.floor(random() * 10) * 5,
+        children: [],
+      })
+      const root = make(0)
+      const pool = [root]
+      for (let i = 1; i < size; i++) {
+        const child = make(i)
+        pool[Math.floor(Math.pow(random(), spread) * pool.length)].children!.push(child)
+        pool.push(child)
+      }
+
+      for (const algorithm of ['bounding-box', 'tidy'] as const) {
+        for (const edge of ['curve', 'straight-arrow', 'org-chart'] as const) {
+          const style = createTestStyle({ algorithm })
+          style.edge.style = edge
+          const layout = layoutTree(root, createTestTreeData(root), style, measurer)
+
+          for (const top of all(layout)) {
+            const where = `tree ${t}, ${algorithm}, ${edge}, subtree ${top.id}`
+            const contour = subtreeContour(top, edge)
+            for (const side of [contour.left, contour.right]) {
+              for (let i = 1; i < side.length; i++) {
+                if (side[i].y < side[i - 1].y) problems.push(`${where}: point ${i} is above the one before it`)
+              }
+            }
+            for (const n of all(top)) {
+              const left = n.x - n.width / 2 - top.x
+              const right = n.x + n.width / 2 - top.x
+              for (const y of [n.y - n.height / 2 - top.y, n.y - top.y, n.y + n.height / 2 - top.y]) {
+                const contourLeft = sideAt(contour.left, y, Math.min)
+                const contourRight = sideAt(contour.right, y, Math.max)
+                if (contourLeft === null || contourLeft > left + 1e-6) {
+                  problems.push(`${where}: left side at y=${y} is ${contourLeft}, inside ${n.id} at ${left}`)
+                }
+                if (contourRight === null || contourRight < right - 1e-6) {
+                  problems.push(`${where}: right side at y=${y} is ${contourRight}, inside ${n.id} at ${right}`)
+                }
+                checked++
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([])
+    expect(checked).toBeGreaterThan(10_000)
+  })
+})
+

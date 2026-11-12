@@ -1,7 +1,6 @@
 import type { TreeNode, LayoutNode } from '@/types'
-import type { LayoutContext, LayoutOptions } from '../types'
+import type { LayoutContext } from '../types'
 import { calculateNodeSize } from '../utils'
-import { attachContours } from '../contour'
 
 /**
  * Bounding Box layout algorithm.
@@ -26,11 +25,7 @@ import { attachContours } from '../contour'
  *
  * Returns centre coordinates with the root at the origin.
  */
-export function boundingBoxLayout(
-  root: TreeNode,
-  context: LayoutContext,
-  options: LayoutOptions = {}
-): LayoutNode {
+export function boundingBoxLayout(root: TreeNode, context: LayoutContext): LayoutNode {
   const { horizontalGap, verticalGap, reduceLeafSiblingGaps } = context.layout
 
   // Breadth-first node list: a node's children are consecutive, and every
@@ -107,8 +102,6 @@ export function boundingBoxLayout(
       nodes[c].y = childrenTop + nodes[c].height / 2
     }
   }
-
-  if (options.contours) attachContours(nodes, context.edgeStyle)
 
   return nodes[0]
 }

@@ -86,8 +86,6 @@ export interface LayoutNode {
   width: number
   height: number
   children: LayoutNode[]
-  /** Edge-aware Y-monotone polygon contour for this subtree */
-  polygonContour?: YMonotonePolygon
 }
 
 // Sizing mode for tree examples

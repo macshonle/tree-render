@@ -6,8 +6,10 @@ import {
   getContourBounds,
   buildSubtreeContour,
   unionContours,
+  subtreeContour,
   type ChildContourInfo,
 } from './contour'
+import type { LayoutNode } from '@/types'
 import type { YMonotonePolygon } from './types'
 
 describe('createNodeContour', () => {
@@ -1259,5 +1261,164 @@ describe('uniform envelope approach for all edge styles', () => {
       // Bounds should extend to child's bottom: 60 + 15 = 75
       expect(bounds.bottom).toBe(75)
     }
+  })
+})
+
+describe('subtreeContour', () => {
+  const edgeStyles = ['curve', 'straight-arrow', 'org-chart'] as const
+
+  /** A layout node from its centre, its size and its children. */
+  function box(x: number, y: number, width: number, height: number, children: LayoutNode[] = []): LayoutNode {
+    return { id: `${x},${y}`, label: '', x, y, width, height, children }
+  }
+
+  /** The same contour, give or take rounding in interpolated points. */
+  function expectSameContour(actual: YMonotonePolygon, expected: YMonotonePolygon): void {
+    for (const side of ['left', 'right'] as const) {
+      expect(actual[side]).toHaveLength(expected[side].length)
+      actual[side].forEach((point, i) => {
+        expect(point.x).toBeCloseTo(expected[side][i].x, 9)
+        expect(point.y).toBeCloseTo(expected[side][i].y, 9)
+      })
+    }
+  }
+
+  /** The contour of a subtree built one parent at a time from its children's contours. */
+  function stepByStep(node: LayoutNode, edgeStyle: (typeof edgeStyles)[number]): YMonotonePolygon {
+    const children: ChildContourInfo[] = node.children.map((child) => ({
+      contour: stepByStep(child, edgeStyle),
+      offsetX: child.x - node.x,
+      offsetY: child.y - node.y,
+      width: child.width,
+      height: child.height,
+    }))
+    return buildSubtreeContour(node.width, node.height, children, edgeStyle)
+  }
+
+  /** Three children of different depths; the middle one reaches deepest and widest. */
+  function sampleTree() {
+    const deep = box(-30, 280, 140, 30)
+    const a1 = box(-30, 190, 60, 40, [deep])
+    const a2 = box(50, 185, 40, 30)
+    const a = box(10, 100, 80, 40, [a1, a2])
+    const b = box(-110, 95, 50, 30)
+    const c = box(140, 105, 70, 50)
+    const root = box(0, 0, 120, 60, [b, a, c])
+    return { root, a, a1, a2, b, c, deep }
+  }
+
+  it('outlines a single node as its rectangle', () => {
+    for (const edgeStyle of edgeStyles) {
+      expect(subtreeContour(box(0, 0, 100, 50), edgeStyle)).toEqual(createNodeContour(100, 50))
+    }
+  })
+
+  it('matches building the same tree one parent at a time', () => {
+    const tree = sampleTree()
+    for (const edgeStyle of edgeStyles) {
+      for (const node of Object.values(tree)) {
+        expectSameContour(subtreeContour(node, edgeStyle), stepByStep(node, edgeStyle))
+      }
+    }
+  })
+
+  it('is relative to the node it outlines', () => {
+    const { a } = sampleTree()
+    const moved = (node: LayoutNode): LayoutNode => ({
+      ...node,
+      x: node.x - a.x,
+      y: node.y - a.y,
+      children: node.children.map(moved),
+    })
+
+    for (const edgeStyle of edgeStyles) {
+      const contour = subtreeContour(a, edgeStyle)
+      expect(contour.left[0]).toEqual({ x: -a.width / 2, y: -a.height / 2 })
+      expect(contour.right[0]).toEqual({ x: a.width / 2, y: -a.height / 2 })
+      expectSameContour(contour, subtreeContour(moved(a), edgeStyle))
+    }
+  })
+
+  it('covers only the subtree it is asked about', () => {
+    const { root, b } = sampleTree()
+    const whole = getContourBounds(subtreeContour(root, 'curve'))
+    const leaf = getContourBounds(subtreeContour(b, 'curve'))
+
+    // The whole tree reaches the deepest node and the outermost edges.
+    expect(whole.bottom).toBe(280 + 15)
+    expect(whole.left).toBe(-110 - 25)
+    expect(whole.right).toBe(140 + 35)
+    // A leaf is just its own box.
+    expect(leaf).toEqual({ top: -15, bottom: 15, left: -25, right: 25 })
+  })
+
+  it('takes children left to right whatever order they are listed in', () => {
+    const { root } = sampleTree()
+    const shuffled = { ...root, children: [root.children[2], root.children[0], root.children[1]] }
+    for (const edgeStyle of edgeStyles) {
+      expect(subtreeContour(shuffled, edgeStyle)).toEqual(subtreeContour(root, edgeStyle))
+    }
+  })
+
+  it('leaves the layout untouched', () => {
+    const { root } = sampleTree()
+    const before = JSON.stringify(root)
+    for (const edgeStyle of edgeStyles) subtreeContour(root, edgeStyle)
+    expect(JSON.stringify(root)).toBe(before)
+  })
+
+  it('outlines a 50,000-node chain without revisiting the levels below', () => {
+    // One node under another, 60 apart. Copying or re-reading the contour of
+    // everything below at each level would take billions of steps here.
+    const count = 50_000
+    let node = box(0, (count - 1) * 60, 40, 20)
+    for (let i = count - 2; i >= 0; i--) node = box(0, i * 60, i % 2 === 0 ? 40 : 30, 20, [node])
+
+    for (const edgeStyle of edgeStyles) {
+      const contour = subtreeContour(node, edgeStyle)
+      // Two corners per node on each side.
+      expect(contour.left).toHaveLength(2 * count)
+      expect(contour.right).toHaveLength(2 * count)
+      expect(contour.left[0]).toEqual({ x: -20, y: -10 })
+      expect(contour.left[2 * count - 1]).toEqual({ x: -20, y: (count - 1) * 60 + 10 })
+      // Every other node is narrower: the third from last is one of those.
+      expect(contour.right[2 * count - 3]).toEqual({ x: 20, y: (count - 2) * 60 + 10 })
+      expect(contour.right[2 * count - 5]).toEqual({ x: 15, y: (count - 3) * 60 + 10 })
+    }
+  })
+
+  it('outlines a deep spine with a leaf on each side at every level', () => {
+    const levels = 20_000
+    let spine = box(0, levels * 60, 40, 20)
+    for (let i = levels - 1; i >= 0; i--) {
+      const y = (i + 1) * 60
+      spine = box(0, i * 60, 40, 20, [box(-50, y, 30, 20), spine, box(50, y + 5, 30, 30)])
+    }
+
+    const contour = subtreeContour(spine, 'org-chart')
+    const bounds = getContourBounds(contour)
+    expect(bounds).toEqual({ top: -10, bottom: levels * 60 + 20, left: -65, right: 65 })
+    for (const side of [contour.left, contour.right]) {
+      let outOfOrder = 0
+      for (let i = 1; i < side.length; i++) if (side[i].y < side[i - 1].y) outOfOrder++
+      expect(outOfOrder).toBe(0)
+    }
+  })
+
+  it('outlines 50,000 children of one node', () => {
+    // Different heights, so the children's bottoms are all at different levels.
+    const count = 50_000
+    const children: LayoutNode[] = []
+    for (let i = 0; i < count; i++) {
+      const height = 20 + ((i * 7919) % count) / 100
+      children.push(box((i - count / 2) * 30, 60 + height / 2, 20, height))
+    }
+    const root = box(0, 0, 40, 20, children)
+
+    const contour = subtreeContour(root, 'curve')
+    const bounds = getContourBounds(contour)
+    expect(bounds.left).toBe((0 - count / 2) * 30 - 10)
+    expect(bounds.right).toBe((count - 1 - count / 2) * 30 + 10)
+    expect(bounds.bottom).toBeCloseTo(60 + 20 + (count - 1) / 100, 9)
   })
 })
