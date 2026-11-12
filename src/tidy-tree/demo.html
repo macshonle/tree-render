@@ -13,6 +13,7 @@
       .card { background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; min-width: 0; }
       .card h2 { font-size: 13px; margin: 0 0 8px; }
       .card code { font-size: 12px; color: #475569; }
+      .card .note { font-size: 12px; margin: 0 0 8px; }
       .card.wide { grid-column: 1 / -1; }
       .fixed { height: 280px; }
       canvas.host { width: 100%; height: 280px; display: block; }
@@ -44,14 +45,20 @@
     <div class="grid">
       <div class="card">
         <h2>1. An element with a height <code>renderTree(div, data)</code></h2>
+        <p class="note">
+          Hover and click: the red node comes from <code>nodeStyle</code>, the hover and selected looks
+          from <code>style</code>, and the highlighted path from <code>linkStyle</code>.
+        </p>
         <div id="fill" class="fixed"></div>
       </div>
       <div class="card">
         <h2>2. An element with no height: the canvas grows to fit</h2>
+        <p class="note">The badges come from a <code>drawNode</code> that calls the built-in painter first.</p>
         <div id="auto"></div>
       </div>
       <div class="card">
         <h2>3. Guest in your canvas <code>renderTree(ctx, data, { rect })</code></h2>
+        <p class="note">The page owns this canvas and passes the pointer on with <code>view.hover</code>.</p>
         <canvas id="host" class="host"></canvas>
       </div>
       <div class="card wide">
@@ -68,7 +75,7 @@
         children: [
           { label: 'Ingest', children: [{ label: 'Kafka' }, { label: 'Batch\nimports' }, { label: 'Webhooks' }] },
           { label: 'Storage', children: [{ label: 'Warehouse', children: [{ label: 'Raw' }, { label: 'Curated' }] }] },
-          { label: 'Alerting' },
+          { label: 'Alerting', status: 'down' },
           { label: 'Reporting', children: [{ label: 'Dashboards' }, { label: 'Scheduled\nexports\n(weekly)' }] },
         ],
       }
@@ -98,11 +105,41 @@
       })
 
       // 1 and 2: hand over an element.
-      const fill = renderTree($('fill'), data, {
+      // 1 is interactive. Hover and selection are tracked for us: all that is
+      // left is to say how they look, and which connectors lead to the selection.
+      const hoverLook = { nodeFill: '#e0f2fe' }
+      let pathToSelection = new Set()
+      const fillOptions = () => ({
         ...options(),
-        onNodeClick: (node) => (status.textContent = node ? `Clicked “${node.data.label.replace(/\n/g, ' ')}”` : ''),
+        style: { ...options().style, hover: hoverLook },
+        selectable: true,
+        nodeStyle: (d) =>
+          d.status === 'down' ? { nodeFill: '#fef2f2', nodeStroke: '#dc2626', textColor: '#991b1b' } : undefined,
+        linkStyle: (node) => (pathToSelection.has(node.data) ? { edgeColor: '#2563eb', edgeWidth: 3 } : undefined),
+        onNodeSelect(node) {
+          pathToSelection = new Set()
+          for (let n = node; n; n = n.parent) pathToSelection.add(n.data)
+          status.textContent = node ? `Selected “${node.data.label.replace(/\n/g, ' ')}”` : ''
+        },
       })
-      const auto = renderTree($('auto'), data, options())
+      const fill = renderTree($('fill'), data, fillOptions())
+
+      // 2 adds to the built-in look: a badge with the number of children.
+      const auto = renderTree($('auto'), data, {
+        ...options(),
+        drawNode(ctx, node, style, { paint }) {
+          paint()
+          if (node.children.length === 0) return
+          const x = node.x + node.width
+          ctx.beginPath()
+          ctx.arc(x, node.y, 8, 0, Math.PI * 2)
+          ctx.fillStyle = '#2563eb'
+          ctx.fill()
+          ctx.fillStyle = '#ffffff'
+          ctx.font = 'bold 10px system-ui, sans-serif'
+          ctx.fillText(String(node.children.length), x, node.y + 0.5)
+        },
+      })
 
       // 3: the page owns this canvas and draws its own content; the tree is
       // a guest in the right-hand part.
@@ -125,12 +162,19 @@
         ctx.font = '12px system-ui, sans-serif'
         ctx.fillText('host chart', 12, 16)
         const rect = { x: 120, y: 8, width: width - 128, height: height - 16 }
-        const guestOptions = { ...options(), rect, style: { ...options().style, background: '#ffffff' } }
+        const guestOptions = { ...options(), rect, style: { ...options().style, background: '#ffffff', hover: hoverLook } }
         if (guest) guest.update(undefined, guestOptions)
         else guest = renderTree(ctx, data, guestOptions)
       }
       paintHost()
       new ResizeObserver(paintHost).observe(host)
+      // A guest listens to nothing. The page tells it where the pointer is and repaints.
+      host.addEventListener('mousemove', (event) => {
+        if (guest.hover(guest.nodeAt(event.offsetX, event.offsetY))) paintHost()
+      })
+      host.addEventListener('mouseleave', () => {
+        if (guest.hover(null)) paintHost()
+      })
 
       // 4: a big tree. Sizes come from the data, so no text is measured.
       const count = 400
@@ -147,7 +191,7 @@
 
       for (const id of ['direction', 'edges', 'layered']) {
         $(id).addEventListener('change', () => {
-          fill.update(undefined, options())
+          fill.update(undefined, fillOptions())
           auto.update(undefined, options())
           paintHost()
           big.update(undefined, { ...options(), style: bigStyle() })

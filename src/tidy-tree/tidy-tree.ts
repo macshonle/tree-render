@@ -19,6 +19,11 @@
  * draws only inside `rect`, and leaves the context state as it found it, so
  * it can share a canvas with whatever else you draw.
  *
+ * What goes in a node is up to you: `nodeStyle` and `linkStyle` restyle one
+ * node or connector at a time, `drawNode` paints nodes your own way (and can
+ * still call the built-in painter), and the node under the pointer and the
+ * selected node are tracked for you and passed to all three.
+ *
  * The first half of the file is the layout alone, which needs no canvas and
  * no DOM. Use it directly to draw with SVG, DOM elements, WebGL or your own
  * canvas code:
@@ -556,7 +561,28 @@ export interface TreeCanvasStyle {
   edgeWidth: number
   /** Painted behind the tree; null leaves what is already there. */
   background: string | null
+  /** How a node's look changes while the pointer is over it; null for no change. */
+  hover: Partial<TreeNodeStyle> | null
+  /** How the selected node's look changes; null for no change. */
+  selected: Partial<TreeNodeStyle> | null
 }
+
+/** The parts of the style that can differ from one node to the next. */
+export type TreeNodeStyle = Pick<
+  TreeCanvasStyle,
+  | 'font'
+  | 'lineHeight'
+  | 'paddingX'
+  | 'paddingY'
+  | 'textColor'
+  | 'nodeFill'
+  | 'nodeStroke'
+  | 'nodeStrokeWidth'
+  | 'nodeRadius'
+>
+
+/** The parts of the style that can differ from one connector to the next. */
+export type TreeLinkStyle = Pick<TreeCanvasStyle, 'edgeStyle' | 'edgeColor' | 'edgeWidth'>
 
 export const defaultTreeCanvasStyle: TreeCanvasStyle = {
   font: '13px system-ui, -apple-system, "Segoe UI", sans-serif',
@@ -572,7 +598,37 @@ export const defaultTreeCanvasStyle: TreeCanvasStyle = {
   edgeColor: '#94a3b8',
   edgeWidth: 1.5,
   background: null,
+  hover: null,
+  selected: { nodeStroke: '#2563eb', nodeStrokeWidth: 3 },
 }
+
+/** What the pointer and the selection have to do with a node. */
+export interface TreeNodeState {
+  /** The pointer is over the node. */
+  readonly hovered: boolean
+  /** The node is the selected one. */
+  readonly selected: boolean
+}
+
+/**
+ * Draws the built-in box and label of the node a `drawNode` call is for,
+ * optionally restyled for this once.
+ */
+export type TreeNodePainter = (changes?: Partial<TreeNodeStyle>) => void
+
+/** What a `drawNode` call gets besides the node and its style. Only valid during the call. */
+export interface TreeNodeDrawing extends TreeNodeState {
+  /** Draws the built-in box and label for this node. */
+  readonly paint: TreeNodePainter
+  /** How much the tree is scaled on the canvas; 1 is full size. */
+  readonly scale: number
+}
+
+/**
+ * The box a label needs. Without arguments, the node's own label in the
+ * node's own style; pass other text, or style changes, to measure those.
+ */
+export type TreeLabelMeasure = (text?: string, changes?: Partial<TreeNodeStyle>) => TidySize
 
 export interface TreeRect {
   x: number
@@ -593,6 +649,24 @@ export interface TreeDrawOptions<T> {
   label?: (data: T) => string
   style?: Partial<TreeCanvasStyle>
   /**
+   * Style for one node: return the keys that differ from `style`, or nothing.
+   * `state` says whether the node is hovered or selected. The tree's
+   * `style.selected` and `style.hover` are applied on top of what this
+   * returns.
+   *
+   * Colours, strokes and the corner radius take effect on the next draw.
+   * `font`, `lineHeight` and the paddings also decide the size measured for
+   * the node's label, which is measured with neither state set, so changing
+   * those needs the layout redone (`update`).
+   */
+  nodeStyle?: (data: T, state: TreeNodeState) => Partial<TreeNodeStyle> | null | undefined
+  /**
+   * Style for the connector leading to `node` from its parent: return the
+   * keys that differ from `style`, or nothing. `state` is that of `node`.
+   * Connectors with a style of their own are drawn over the others.
+   */
+  linkStyle?: (node: TidyNode<T>, state: TreeNodeState) => Partial<TreeLinkStyle> | null | undefined
+  /**
    * Where to draw, in the context's current coordinates (CSS pixels when
    * tidy-tree owns the canvas). Default: the whole canvas.
    */
@@ -605,15 +679,74 @@ export interface TreeDrawOptions<T> {
    */
   fit?: 'scale-down' | 'contain' | 'none'
   /**
-   * Replaces the built-in node painting. Called in layout coordinates, so
-   * draw at `node.x`, `node.y` with `node.width` × `node.height`.
+   * Your own node painter, called for every node in place of the built-in
+   * one. It is called in layout coordinates, so the node's box is at
+   * `node.x`, `node.y` and is `node.width` × `node.height`.
+   *
+   * `style` is the node's own style: the tree's, with `nodeStyle` and the
+   * hover and selected changes applied. `drawing.paint()` draws the built-in
+   * box and label, so a painter can add to the standard look or leave alone
+   * the nodes it has nothing special for; `paint({ nodeFill: … })` restyles
+   * it for this once. `drawing` also says whether the node is hovered or
+   * selected, and how much the tree is scaled.
+   *
+   * The context arrives with the node's font, centred text and a middle
+   * baseline.
    */
-  drawNode?: (ctx: CanvasRenderingContext2D, node: TidyNode<T>, style: TreeCanvasStyle) => void
+  drawNode?: (
+    ctx: CanvasRenderingContext2D,
+    node: TidyNode<T>,
+    style: TreeCanvasStyle,
+    drawing: TreeNodeDrawing
+  ) => void
+  /**
+   * Save the context before each `drawNode` call and restore it after, so
+   * nothing a painter changes reaches the next node. Default true. Turn off
+   * for a painter that cleans up after itself, or to carry state from one
+   * node to the next on purpose.
+   */
+  restoreContext?: boolean
+  /**
+   * Confine each `drawNode` call to the node's outline: its box with rounded
+   * corners, border included. Default false, so that a painter can draw a
+   * badge or a shadow outside the box. Clipping always saves and restores
+   * the context, whatever `restoreContext` says.
+   */
+  clipNodes?: boolean
 }
 
-export interface TreeCanvasOptions<T> extends TreeDrawOptions<T>, TidyTreeOptions<T> {
+/** The node the pointer is over and the selected node, for `drawTree`. */
+export interface TreeDrawState<T> {
+  hovered?: TidyNode<T> | null
+  selected?: TidyNode<T> | null
+}
+
+export interface TreeCanvasOptions<T> extends TreeDrawOptions<T>, Omit<TidyTreeOptions<T>, 'nodeSize'> {
+  /**
+   * Size of each node's box: one fixed size, or a function of the data.
+   * Default: the node's label, measured, plus padding. A function is also
+   * given `measure`, for a box that is the label and something more.
+   */
+  nodeSize?: TidySize | ((data: T, measure: TreeLabelMeasure) => TidySize)
   /** Called on click when tidy-tree owns the canvas; `node` is null for empty space. */
   onNodeClick?: (node: TidyNode<T> | null, event: MouseEvent) => void
+  /**
+   * Called when the pointer moves onto a node, from one node to another, or
+   * off the nodes (`node` is null). Only when tidy-tree owns the canvas. It
+   * runs before the redraw, so what it sets is drawn.
+   */
+  onNodeHover?: (node: TidyNode<T> | null, event: MouseEvent) => void
+  /**
+   * Let a click select the node under it, and a click on empty space clear
+   * the selection. Default false. Only when tidy-tree owns the canvas;
+   * `view.select` works either way.
+   */
+  selectable?: boolean
+  /**
+   * Called when a click changes the selection; `node` is null when it is
+   * cleared. It runs before the redraw, so what it sets is drawn.
+   */
+  onNodeSelect?: (node: TidyNode<T> | null, event: MouseEvent) => void
   /** Redraw when the owned canvas or its container resizes. Default true. */
   autoResize?: boolean
   /**
@@ -631,12 +764,24 @@ export interface TreeView<T> {
   readonly tree: TidyTree<T>
   /** The transform used by the last draw. */
   readonly transform: TreeTransform
+  /** The node the pointer is over, or null. */
+  readonly hovered: TidyNode<T> | null
+  /** The selected node, or null. */
+  readonly selected: TidyNode<T> | null
   /** Lay out and draw again, optionally with new data and/or changed options. */
   update(data?: T, options?: TreeCanvasOptions<T>): void
   /** Draw again without laying out, e.g. after you have repainted a shared canvas. */
   draw(): void
   /** The node under a canvas position such as `event.offsetX`, `event.offsetY`. */
   nodeAt(x: number, y: number): TidyNode<T> | null
+  /**
+   * Set the hovered node. Returns whether that changed anything. Redraws
+   * when tidy-tree owns the canvas; as a guest, repaint and call `draw`.
+   * Tidy-tree calls this itself for a canvas it owns.
+   */
+  hover(node: TidyNode<T> | null): boolean
+  /** Set the selected node. Returns and redraws as `hover` does. */
+  select(node: TidyNode<T> | null): boolean
   /** Stop observing and listening; removes the canvas if tidy-tree created it. */
   destroy(): void
 }
@@ -644,14 +789,45 @@ export interface TreeView<T> {
 export type TreeTarget = HTMLElement | HTMLCanvasElement | CanvasRenderingContext2D
 
 // ---------------------------------------------------------------------------
-// Canvas: measuring
+// Canvas: styles and measuring
 // ---------------------------------------------------------------------------
+
+const RESTING: TreeNodeState = Object.freeze({ hovered: false, selected: false })
+const HOVERED: TreeNodeState = Object.freeze({ hovered: true, selected: false })
+const SELECTED: TreeNodeState = Object.freeze({ hovered: false, selected: true })
+const HOVERED_AND_SELECTED: TreeNodeState = Object.freeze({ hovered: true, selected: true })
+
+function stateOf(hovered: boolean, selected: boolean): TreeNodeState {
+  return hovered ? (selected ? HOVERED_AND_SELECTED : HOVERED) : selected ? SELECTED : RESTING
+}
 
 function defaultLabel(data: unknown): string {
   if (data === null || typeof data !== 'object') return data === null || data === undefined ? '' : String(data)
   const d = data as Record<string, unknown>
   const value = d.label ?? d.name ?? d.title ?? d.id
   return value === null || value === undefined ? '' : String(value)
+}
+
+/**
+ * `base` with the keys that `changes` defines. A key set to undefined leaves
+ * the base value alone. Returns `base` itself when nothing differs.
+ */
+function restyled(base: TreeCanvasStyle, changes: Partial<TreeCanvasStyle> | null | undefined): TreeCanvasStyle {
+  if (!changes) return base
+  const from = base as unknown as Record<string, unknown>
+  const to = changes as Record<string, unknown>
+  let result: Record<string, unknown> = from
+  for (const key of Object.keys(to)) {
+    if (to[key] === undefined || to[key] === from[key]) continue
+    if (result === from) result = { ...from }
+    result[key] = to[key]
+  }
+  return result as unknown as TreeCanvasStyle
+}
+
+/** The style of a whole tree: the defaults with the caller's changes. Always a new object. */
+function treeStyle(changes: Partial<TreeCanvasStyle> | null | undefined): TreeCanvasStyle {
+  return { ...restyled(defaultTreeCanvasStyle, changes) }
 }
 
 /**
@@ -663,7 +839,7 @@ export function measureLabel(
   text: string,
   style: Partial<TreeCanvasStyle> = {}
 ): TidySize {
-  const s = { ...defaultTreeCanvasStyle, ...style }
+  const s = restyled(defaultTreeCanvasStyle, style)
   const lines = text.split('\n')
   let widest = 0
   for (const line of lines) widest = Math.max(widest, ctx.measureText(line).width)
@@ -764,20 +940,49 @@ function edgePath<T>(
   }
 }
 
+/** The built-in look of a node: a rounded box, and its label unless `text` is null. */
+function paintNode<T>(
+  ctx: CanvasRenderingContext2D,
+  node: TidyNode<T>,
+  style: TreeCanvasStyle,
+  text: string | null
+): void {
+  roundedRectPath(ctx, node.x, node.y, node.width, node.height, style.nodeRadius)
+  ctx.fillStyle = style.nodeFill
+  ctx.fill()
+  if (style.nodeStrokeWidth > 0) {
+    ctx.strokeStyle = style.nodeStroke
+    ctx.lineWidth = style.nodeStrokeWidth
+    ctx.stroke()
+  }
+  if (text === null) return
+  const lines = text.split('\n')
+  ctx.fillStyle = style.textColor
+  const cx = node.x + node.width / 2
+  const firstLine = node.y + node.height / 2 - ((lines.length - 1) * style.lineHeight) / 2
+  for (let l = 0; l < lines.length; l++) ctx.fillText(lines[l], cx, firstLine + l * style.lineHeight)
+}
+
 /**
  * Paint an already laid-out tree into a context, inside `options.rect`.
  * The context's state (transform, clip, styles) is restored afterwards.
  * Returns the transform used, for mapping pointer positions back to nodes.
+ *
+ * `options.hovered` and `options.selected` name the nodes to draw in those
+ * states; `renderTree` keeps track of them for you.
  */
 export function drawTree<T>(
   ctx: CanvasRenderingContext2D,
   tree: TidyTree<T>,
-  options: TreeDrawOptions<T> = {}
+  options: TreeDrawOptions<T> & TreeDrawState<T> = {}
 ): TreeTransform {
-  const style: TreeCanvasStyle = { ...defaultTreeCanvasStyle, ...options.style }
+  const style = treeStyle(options.style)
   const rect = options.rect ?? visibleRect(ctx)
   const transform = fitTransform(tree, rect, options.margin ?? 16, options.fit ?? 'scale-down')
   const label = options.label ?? defaultLabel
+  const { nodeStyle, linkStyle, drawNode } = options
+  const hovered = options.hovered ?? null
+  const selected = options.selected ?? null
   const nodes = tree.nodes
 
   ctx.save()
@@ -791,39 +996,107 @@ export function drawTree<T>(
   ctx.translate(transform.x, transform.y)
   ctx.scale(transform.scale, transform.scale)
 
-  // Connectors first, in one path, so boxes sit on top of them.
+  // Connectors first, so boxes sit on top of them. Those in the tree's own
+  // style share one path; those with a style of their own follow, one by
+  // one, so that they are not hidden under the rest.
+  const ownStyleLinks: [TidyNode<T>, TreeCanvasStyle][] = []
   ctx.beginPath()
-  for (let i = 1; i < nodes.length; i++) edgePath(ctx, nodes[i], tree, style.edgeStyle)
+  for (let i = 1; i < nodes.length; i++) {
+    const node = nodes[i]
+    if (linkStyle) {
+      const s = restyled(style, linkStyle(node, stateOf(node === hovered, node === selected)))
+      if (s.edgeStyle !== style.edgeStyle || s.edgeColor !== style.edgeColor || s.edgeWidth !== style.edgeWidth) {
+        ownStyleLinks.push([node, s])
+        continue
+      }
+    }
+    edgePath(ctx, node, tree, style.edgeStyle)
+  }
   ctx.strokeStyle = style.edgeColor
   ctx.lineWidth = style.edgeWidth
   ctx.lineJoin = 'round'
   ctx.stroke()
+  for (const [node, s] of ownStyleLinks) {
+    ctx.beginPath()
+    edgePath(ctx, node, tree, s.edgeStyle)
+    ctx.strokeStyle = s.edgeColor
+    ctx.lineWidth = s.edgeWidth
+    ctx.stroke()
+  }
 
-  ctx.font = style.font
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
+  ctx.font = style.font
+  // The font the context has, so it is only set when a node's differs.
+  let font = style.font
   // Labels that would come out smaller than about 3px are just noise.
-  const showText = style.lineHeight * transform.scale >= 3
+  const textOf = (node: TidyNode<T>, s: TreeCanvasStyle): string | null =>
+    s.lineHeight * transform.scale >= 3 ? label(node.data) : null
+
+  // What a custom painter is handed. One object serves every call: it
+  // describes the node the call in progress is for.
+  const isolate = options.clipNodes === true || options.restoreContext !== false
+  let current = nodes[0]
+  let currentStyle = style
+  const drawing = {
+    hovered: false,
+    selected: false,
+    scale: transform.scale,
+    paint(changes?: Partial<TreeNodeStyle>): void {
+      const s = restyled(currentStyle, changes)
+      // The painter may have changed any of these before calling.
+      ctx.font = s.font
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      paintNode(ctx, current, s, textOf(current, s))
+    },
+  }
+
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i]
-    if (options.drawNode) {
-      options.drawNode(ctx, node, style)
+    const isHovered = node === hovered
+    const isSelected = node === selected
+    let s = nodeStyle ? restyled(style, nodeStyle(node.data, stateOf(isHovered, isSelected))) : style
+    if (isSelected) s = restyled(s, style.selected)
+    if (isHovered) s = restyled(s, style.hover)
+
+    if (!drawNode) {
+      if (s.font !== font) {
+        ctx.font = s.font
+        font = s.font
+      }
+      paintNode(ctx, node, s, textOf(node, s))
       continue
     }
-    roundedRectPath(ctx, node.x, node.y, node.width, node.height, style.nodeRadius)
-    ctx.fillStyle = style.nodeFill
-    ctx.fill()
-    if (style.nodeStrokeWidth > 0) {
-      ctx.strokeStyle = style.nodeStroke
-      ctx.lineWidth = style.nodeStrokeWidth
-      ctx.stroke()
+
+    current = node
+    currentStyle = s
+    drawing.hovered = isHovered
+    drawing.selected = isSelected
+    if (isolate) {
+      if (s.font !== font) {
+        ctx.font = s.font
+        font = s.font
+      }
+      ctx.save()
+      if (options.clipNodes) {
+        // The outline of the built-in look: the box, grown by the half of
+        // the border that lies outside it.
+        const half = s.nodeStrokeWidth > 0 ? s.nodeStrokeWidth / 2 : 0
+        const radius = s.nodeRadius > 0 ? s.nodeRadius + half : 0
+        roundedRectPath(ctx, node.x - half, node.y - half, node.width + half * 2, node.height + half * 2, radius)
+        ctx.clip()
+      }
+      drawNode(ctx, node, s, drawing)
+      ctx.restore()
+    } else {
+      // Nothing puts back what the last painter changed, so set what every
+      // painter is promised.
+      ctx.font = s.font
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      drawNode(ctx, node, s, drawing)
     }
-    if (!showText) continue
-    const lines = label(node.data).split('\n')
-    ctx.fillStyle = style.textColor
-    const cx = node.x + node.width / 2
-    const firstLine = node.y + node.height / 2 - ((lines.length - 1) * style.lineHeight) / 2
-    for (let l = 0; l < lines.length; l++) ctx.fillText(lines[l], cx, firstLine + l * style.lineHeight)
   }
   ctx.restore()
   return transform
@@ -846,12 +1119,20 @@ function isCanvas(target: unknown): target is HTMLCanvasElement {
  * Measure, lay out and draw a tree. See the top of this file for what each
  * kind of target means. Returns a handle for updating, hit-testing and
  * cleaning up.
+ *
+ * For a canvas it owns it also follows the pointer: the node under it is
+ * `view.hovered`, and with `selectable` a click sets `view.selected`. Both
+ * are passed to `nodeStyle`, `linkStyle` and `drawNode`, and have built-in
+ * looks in `style.hover` and `style.selected`. As a guest it listens to
+ * nothing; tell it with `view.hover` and `view.select`.
  */
 export function renderTree<T>(target: TreeTarget, data: T, options: TreeCanvasOptions<T> = {}): TreeView<T> {
   let currentData = data
   let currentOptions = options
   let tree!: TidyTree<T>
   let transform: TreeTransform = { scale: 1, x: 0, y: 0 }
+  let hovered: TidyNode<T> | null = null
+  let selected: TidyNode<T> | null = null
 
   let canvas: HTMLCanvasElement
   let ctx: CanvasRenderingContext2D
@@ -895,31 +1176,61 @@ export function renderTree<T>(target: TreeTarget, data: T, options: TreeCanvasOp
     if (!context) throw new Error('tidy-tree: could not get a 2D context from the canvas')
     ctx = context
   }
+  const cursorBefore = owns ? canvas.style.cursor || '' : ''
 
   const sizeCache = new Map<string, TidySize>()
   let cacheKey = ''
 
+  /** The node of the new layout that stands for `old`: the one made from the same data. */
+  function carriedOver(old: TidyNode<T> | null): TidyNode<T> | null {
+    if (!old) return null
+    const nodes = tree.nodes
+    for (let i = 0; i < nodes.length; i++) if (nodes[i].data === old.data) return nodes[i]
+    return null
+  }
+
   function layout(): void {
-    const style: TreeCanvasStyle = { ...defaultTreeCanvasStyle, ...currentOptions.style }
+    const style = treeStyle(currentOptions.style)
     const label = currentOptions.label ?? defaultLabel
-    const key = `${style.font}|${style.lineHeight}|${style.paddingX}|${style.paddingY}`
+    const nodeStyle = currentOptions.nodeStyle
+    const sizeOption = currentOptions.nodeSize
+    const metrics = (s: TreeCanvasStyle) => `${s.font}|${s.lineHeight}|${s.paddingX}|${s.paddingY}`
+    const key = metrics(style)
     if (key !== cacheKey) {
       sizeCache.clear()
       cacheKey = key
     }
     ctx.save()
     ctx.font = style.font
-    const measured = (d: T): TidySize => {
-      const text = label(d)
-      let size = sizeCache.get(text)
+    // Sizes are those of the resting state: hovering must not move anything.
+    const styleFor = (d: T): TreeCanvasStyle => (nodeStyle ? restyled(style, nodeStyle(d, RESTING)) : style)
+    const boxFor = (text: string, own: TreeCanvasStyle): TidySize => {
+      // A style that changes how a label measures is part of what the size
+      // is cached under.
+      const ownKey = own === style ? key : metrics(own)
+      const cacheAs = ownKey === key ? text : `${ownKey}\u0000${text}`
+      let size = sizeCache.get(cacheAs)
       if (!size) {
-        size = measureLabel(ctx, text, style)
-        sizeCache.set(text, size)
+        if (own.font !== style.font) ctx.font = own.font
+        size = measureLabel(ctx, text, own)
+        if (own.font !== style.font) ctx.font = style.font
+        sizeCache.set(cacheAs, size)
       }
       return size
     }
-    tree = tidyTree(currentData, { ...currentOptions, nodeSize: currentOptions.nodeSize ?? measured })
+    const nodeSize =
+      typeof sizeOption === 'function'
+        ? (d: T): TidySize =>
+            sizeOption(d, (text, changes) => {
+              // Copied: the cached size must not be the caller's to change.
+              const size = boxFor(text ?? label(d), restyled(styleFor(d), changes))
+              return { width: size.width, height: size.height }
+            })
+        : (sizeOption ?? ((d: T): TidySize => boxFor(label(d), styleFor(d))))
+    tree = tidyTree(currentData, { ...currentOptions, nodeSize })
     ctx.restore()
+    hovered = carriedOver(hovered)
+    selected = carriedOver(selected)
   }
 
   let lastWidth = -1
@@ -927,7 +1238,7 @@ export function renderTree<T>(target: TreeTarget, data: T, options: TreeCanvasOp
 
   function draw(): void {
     if (!owns) {
-      transform = drawTree(ctx, tree, currentOptions)
+      transform = drawTree(ctx, tree, { ...currentOptions, hovered, selected })
       return
     }
     let width = canvas.clientWidth
@@ -962,16 +1273,67 @@ export function renderTree<T>(target: TreeTarget, data: T, options: TreeCanvasOp
     lastHeight = height
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
     ctx.clearRect(0, 0, width, height)
-    transform = drawTree(ctx, tree, { ...currentOptions, rect: currentOptions.rect ?? { x: 0, y: 0, width, height } })
+    transform = drawTree(ctx, tree, {
+      ...currentOptions,
+      rect: currentOptions.rect ?? { x: 0, y: 0, width, height },
+      hovered,
+      selected,
+    })
+  }
+
+  /** Whether anything drawn depends on which node is hovered. */
+  function hoverShows(): boolean {
+    const o = currentOptions
+    return !!(o.nodeStyle || o.linkStyle || o.drawNode || o.style?.hover)
+  }
+
+  /** A pointer over something a click acts on, when the canvas is ours to style. */
+  function showCursor(): void {
+    if (!owns) return
+    const clickable = !!(currentOptions.onNodeClick || currentOptions.selectable)
+    canvas.style.cursor = clickable && hovered ? 'pointer' : cursorBefore
+  }
+
+  // Both of these tell the caller before they redraw, so that whatever the
+  // caller's handler sets is already in the picture. `event` is null when
+  // the caller made the change itself, which needs no telling.
+
+  function setHovered(node: TidyNode<T> | null, event: MouseEvent | null): boolean {
+    if (node === hovered) return false
+    hovered = node
+    showCursor()
+    if (event) currentOptions.onNodeHover?.(node, event)
+    if (owns && hoverShows()) draw()
+    return true
+  }
+
+  function setSelected(node: TidyNode<T> | null, event: MouseEvent | null): boolean {
+    if (node === selected) return false
+    selected = node
+    if (event) currentOptions.onNodeSelect?.(node, event)
+    if (owns) draw()
+    return true
   }
 
   function onClick(event: MouseEvent): void {
-    currentOptions.onNodeClick?.(view.nodeAt(event.offsetX, event.offsetY), event)
+    const node = view.nodeAt(event.offsetX, event.offsetY)
+    if (currentOptions.selectable) setSelected(node, event)
+    currentOptions.onNodeClick?.(node, event)
+  }
+
+  function onMove(event: MouseEvent): void {
+    setHovered(view.nodeAt(event.offsetX, event.offsetY), event)
+  }
+
+  function onLeave(event: MouseEvent): void {
+    setHovered(null, event)
   }
 
   let observer: ResizeObserver | null = null
   if (owns) {
     canvas.addEventListener('click', onClick)
+    canvas.addEventListener('mousemove', onMove)
+    canvas.addEventListener('mouseleave', onLeave)
     if (options.autoResize !== false && typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(() => {
         // Our own height changes in auto-height mode must not retrigger.
@@ -993,20 +1355,34 @@ export function renderTree<T>(target: TreeTarget, data: T, options: TreeCanvasOp
     get transform() {
       return transform
     },
+    get hovered() {
+      return hovered
+    },
+    get selected() {
+      return selected
+    },
     update(newData?: T, newOptions?: TreeCanvasOptions<T>) {
       if (newData !== undefined) currentData = newData
       if (newOptions) currentOptions = { ...currentOptions, ...newOptions }
       layout()
+      showCursor()
       draw()
     },
     draw,
     nodeAt(x: number, y: number) {
       return nodeAt(tree, (x - transform.x) / transform.scale, (y - transform.y) / transform.scale)
     },
+    hover: (node) => setHovered(node, null),
+    select: (node) => setSelected(node, null),
     destroy() {
       observer?.disconnect()
       observer = null
-      if (owns) canvas.removeEventListener('click', onClick)
+      if (owns) {
+        canvas.removeEventListener('click', onClick)
+        canvas.removeEventListener('mousemove', onMove)
+        canvas.removeEventListener('mouseleave', onLeave)
+        canvas.style.cursor = cursorBefore
+      }
       if (container) {
         if (canvas.parentNode === container) container.removeChild(canvas)
         if (restorePosition !== null) container.style.position = restorePosition

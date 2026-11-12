@@ -30,7 +30,7 @@ One file.
 
 There is nothing to install and nothing else to copy. The file has no imports, no stylesheet and no assets.
 
-`dist-lib/` is build output and is not checked in. To produce it, run `pnpm install` once and then `pnpm build:lib` (or `make lib`). That compiles the same source to `tidy-tree.js`, about 33 kB before minifying, and writes `tidy-tree.d.ts` beside it. The `.d.ts` is optional: it gives editors the types.
+`dist-lib/` is build output and is not checked in. To produce it, run `pnpm install` once and then `pnpm build:lib` (or `make lib`). That compiles the same source to `tidy-tree.js`, about 42 kB before minifying, and writes `tidy-tree.d.ts` beside it. The `.d.ts` is optional: it gives editors the types.
 
 The JavaScript file is a standard ES module targeting ES2020. Load it from a module script, or with a dynamic import from an ordinary one:
 
@@ -92,6 +92,8 @@ Because it watches nothing, you tell it when to act:
 | You have repainted the canvas | `view.draw()` |
 | The rectangle or the data changed | `view.update(data, { rect })` |
 | You need the node under a click | `view.nodeAt(event.offsetX, event.offsetY)` |
+| The pointer moved | `view.hover(node)`, then repaint if it returns true |
+| A node was chosen | `view.select(node)`, then repaint if it returns true |
 
 Set `style.background` to have it fill the rectangle first.
 
@@ -130,6 +132,8 @@ Pass `nodeSize` to skip measuring: either one `{ width, height }` for every node
 
 ## Options
 
+Layout:
+
 | Option | Default | What it does |
 | :--- | :--- | :--- |
 | `direction` | `'down'` | Which way the tree grows: `'down'`, `'up'`, `'right'` or `'left'`. |
@@ -139,15 +143,32 @@ Pass `nodeSize` to skip measuring: either one `{ width, height }` for every node
 | `symmetric` | `true` | Exact left/right symmetry, at the cost of a second layout pass. |
 | `spacing` | none | `(a, b) => gap` for two nodes that face each other, in place of `nodeGap`. For example, tighter gaps between sibling leaves. |
 | `children` | `d => d.children` | Child accessor. The input must be a tree, with no cycles. |
+| `nodeSize` | measured from the label | One size, or a function of the data. See [Sizing a node](#sizing-a-node). |
+
+Appearance:
+
+| Option | Default | What it does |
+| :--- | :--- | :--- |
 | `label` | see above | Text for a node. |
-| `nodeSize` | measured from the label | One size, or a function of the data. |
-| `style` | see below | Fonts, colours, padding and connector shape. |
+| `style` | see below | Fonts, colours, padding and connector shape for the whole tree. |
+| `nodeStyle` | none | Style for one node. See [Styling individual nodes](#styling-individual-nodes). |
+| `linkStyle` | none | Style for one connector. See [Connectors](#connectors). |
+| `drawNode` | none | Your own node painter. See [Custom nodes](#custom-nodes). |
+| `restoreContext` | `true` | Save and restore the context around each `drawNode` call. |
+| `clipNodes` | `false` | Confine each `drawNode` call to its node's outline. |
 | `fit` | `'scale-down'` | `'scale-down'` shrinks the tree to fit but never enlarges it. `'contain'` also enlarges it. `'none'` draws at 1:1. |
 | `margin` | `16` | Space kept free inside the drawing area. |
 | `rect` | the whole canvas | Where to draw. |
-| `drawNode` | none | Your own node painter. See [Custom nodes](#custom-nodes). |
-| `onNodeClick` | none | `(node, event) => …`, with `node` null for empty space. Only when it owns the canvas. |
-| `autoResize` | `true` | Redraw on resize. Only when it owns the canvas. |
+
+Interaction and sizing of the canvas, which apply only when it owns the canvas:
+
+| Option | Default | What it does |
+| :--- | :--- | :--- |
+| `onNodeClick` | none | `(node, event) => …`, with `node` null for empty space. |
+| `onNodeHover` | none | `(node, event) => …` when the node under the pointer changes. |
+| `selectable` | `false` | A click selects the node under it. |
+| `onNodeSelect` | none | `(node, event) => …` when a click changes the selection. |
+| `autoResize` | `true` | Redraw on resize. |
 | `height` | by the element | `'fill'` or `'auto'`. Only for an element target. |
 
 ### Style
@@ -165,6 +186,8 @@ Pass `nodeSize` to skip measuring: either one `{ width, height }` for every node
 | `edgeStyle` | `'elbow'`; also `'curve'` and `'straight'` |
 | `edgeColor`, `edgeWidth` | `'#94a3b8'`, `1.5` |
 | `background` | `null`, which leaves what is already there |
+| `hover` | `null`: no change. Node keys to apply to the node under the pointer. |
+| `selected` | `{ nodeStroke: '#2563eb', nodeStrokeWidth: 3 }`. Node keys to apply to the selected node. |
 
 ```js
 renderTree(canvas, data, {
@@ -174,9 +197,162 @@ renderTree(canvas, data, {
 
 Labels are left out when the tree is scaled so small that they would be unreadable.
 
+## What goes in a node
+
+The sections below go from the least work to the most: restyle a node, use the built-in hover and selection, restyle a connector, paint nodes yourself, and choose their size.
+
+### Styling individual nodes
+
+`nodeStyle(data, state)` returns the style keys that differ for one node, or nothing to leave it like the rest.
+
+```js
+renderTree(canvas, data, {
+  nodeStyle: (d) =>
+    d.status === 'down' ? { nodeFill: '#fef2f2', nodeStroke: '#dc2626', textColor: '#991b1b' } : undefined,
+})
+```
+
+It can set the node keys: `font`, `lineHeight`, `paddingX`, `paddingY`, `textColor`, `nodeFill`, `nodeStroke`, `nodeStrokeWidth` and `nodeRadius`.
+
+It is called on every draw, so it can follow anything you keep track of. Change what it returns and call `view.draw()`. A change of `font`, `lineHeight` or padding changes the size of the node, so that needs `view.update()` instead.
+
+### Hover and selection
+
+For a canvas it owns, the view tracks two states itself:
+
+| State | How it is set | Built-in look |
+| :--- | :--- | :--- |
+| hovered | The pointer is over the node. | None until you set `style.hover`. |
+| selected | With `selectable: true`, a click on the node. A click on empty space clears it. | A heavier blue border. Change it with `style.selected`, or set that to `null`. |
+
+```js
+const view = renderTree(canvas, data, {
+  selectable: true,
+  style: { hover: { nodeFill: '#e0f2fe' } },
+  onNodeSelect: (node) => showDetails(node ? node.data : null),
+})
+```
+
+Both states reach everything that decides how things look:
+
+- `nodeStyle(data, state)` and `linkStyle(node, state)` get `state.hovered` and `state.selected`.
+- `drawNode` gets `hovered` and `selected` in its last argument.
+- `style.selected` and then `style.hover` are applied on top of what `nodeStyle` returns.
+
+Around those:
+
+- `view.hovered` and `view.selected` are the nodes, or null.
+- `view.select(node)` and `view.hover(node)` set them from your own code. They return whether anything changed, and do not call the handlers.
+- `onNodeHover` and `onNodeSelect` run before the redraw, so anything they set is in the picture.
+- The cursor becomes a pointer over a node when a click would do something: with `onNodeClick` or `selectable`.
+- Sizes are measured with neither state set, so hovering and selecting never move anything.
+- After `update`, both states stay with the same data object. If that object is no longer in the tree, the state is cleared.
+
+As a guest in your canvas it listens to nothing, so pass the pointer on:
+
+```js
+canvas.addEventListener('mousemove', (event) => {
+  if (view.hover(view.nodeAt(event.offsetX, event.offsetY))) repaintMyCanvas()
+})
+```
+
+### Connectors
+
+`linkStyle(node, state)` styles the connector that leads to `node` from its parent. It can return `edgeColor`, `edgeWidth` and `edgeStyle`. Connectors with a style of their own are drawn over the others.
+
+This highlights the path from the root to the selected node:
+
+```js
+let path = new Set()
+
+renderTree(canvas, data, {
+  selectable: true,
+  onNodeSelect(node) {
+    path = new Set()
+    for (let n = node; n; n = n.parent) path.add(n.data)
+  },
+  linkStyle: (node) => (path.has(node.data) ? { edgeColor: '#2563eb', edgeWidth: 3 } : undefined),
+})
+```
+
+Connectors always attach to the middle of a box's sides.
+
 ### Custom nodes
 
-`drawNode(ctx, node, style)` replaces the built-in box and label. It is called in layout coordinates, so draw at `node.x`, `node.y` with `node.width` × `node.height`. Connectors are still drawn for you, to the middle of each box's sides.
+`drawNode(ctx, node, style, drawing)` is called for every node in place of the built-in painter. It is called in layout coordinates, so the node's box is at `node.x`, `node.y` and is `node.width` × `node.height`. Inside it you can draw anything a canvas can, driven by `node.data`.
+
+`drawing` holds what else a painter needs:
+
+| Member | What it is |
+| :--- | :--- |
+| `paint()` | Draws the built-in box and label for this node. `paint({ nodeFill: '#fde68a' })` changes those keys for this call only. |
+| `hovered`, `selected` | The node's state. |
+| `scale` | How much the tree is scaled on the canvas; 1 is full size. |
+
+Call `paint()` and then draw on top to add to the standard look:
+
+```js
+renderTree(canvas, data, {
+  drawNode(ctx, node, style, { paint }) {
+    paint()
+    if (!node.data.alerts) return
+    ctx.beginPath()
+    ctx.arc(node.x + node.width, node.y, 8, 0, Math.PI * 2)
+    ctx.fillStyle = '#dc2626'
+    ctx.fill()
+    ctx.fillStyle = '#ffffff'
+    ctx.fillText(String(node.data.alerts), node.x + node.width, node.y)
+  },
+})
+```
+
+Or call it only for the nodes you have nothing special for:
+
+```js
+drawNode(ctx, node, style, { paint }) {
+  if (!node.data.photo) return paint()
+  ctx.drawImage(node.data.photo, node.x, node.y, node.width, node.height)
+}
+```
+
+Leave it out to replace the look entirely.
+
+What a painter can rely on:
+
+- `style` is the node's own style: the tree's, with `nodeStyle` and the hover and selected looks applied.
+- The context arrives with the node's font, centred text and a middle baseline.
+
+Two flags decide how far a painter is fenced in:
+
+| Flag | Default | Effect |
+| :--- | :--- | :--- |
+| `restoreContext` | `true` | The context is saved before each call and restored after, so nothing a painter changes reaches the next node. Turn it off for a painter that cleans up after itself, or to carry state from node to node on purpose. |
+| `clipNodes` | `false` | Each call is clipped to the node's outline: its box with rounded corners, border included. Off by default so that a badge or a shadow can extend past the box. Clipping always saves and restores. |
+
+### Sizing a node
+
+A node is as big as its label plus padding unless `nodeSize` says otherwise. Give one `{ width, height }` for every node, or a function of the data.
+
+The function also gets `measure`, which returns the box the label needs in that node's style. Use it for a box that is the label and something more:
+
+```js
+renderTree(canvas, tasks, {
+  nodeSize(task, measure) {
+    const box = measure()
+    return { width: Math.max(box.width, 80), height: box.height + 10 }
+  },
+  drawNode(ctx, node, style, { paint }) {
+    paint()
+    // A progress bar under the label.
+    ctx.fillStyle = '#22c55e'
+    ctx.fillRect(node.x + 6, node.y + node.height - 10, (node.width - 12) * node.data.done, 4)
+  },
+})
+```
+
+`measure('other text')` measures that text instead, and `measure(undefined, { font: … })` measures with those style keys changed.
+
+A fixed size suits painters that ignore the label:
 
 ```js
 renderTree(canvas, data, {
@@ -190,16 +366,9 @@ renderTree(canvas, data, {
 })
 ```
 
-Inside it you can draw anything a canvas can, driven by `node.data`: images, icons, several fonts, a different colour for each node. Its limits:
+### HTML in a node
 
-- It is all or nothing. Once set it paints every node, and the built-in painter is not available to call for the ones you would have left alone.
-- The `style` option is one style for the whole tree. A per-node colour or font means a `drawNode`.
-- You supply the size, through `nodeSize`, whenever the box should be anything other than its label plus padding.
-- Nothing is clipped to the box, and the context is not saved and restored around each call. Undo any transform, clip or alpha you set.
-- It is not told about hover or selection. Keep that state yourself, read it in `drawNode`, and call `view.draw()` when it changes.
-- Connectors cannot be customised per edge.
-
-A canvas cannot hold HTML. For nodes that are real elements, such as links, inputs or rich text, use the [layout on its own](#layout-only) and position your elements from it.
+A canvas cannot hold HTML, so links, inputs and rich text have to be real elements placed over or instead of the canvas. `view.tree.nodes` gives each node's box and `view.transform` maps it to canvas pixels, which is enough to position your own elements. To skip the canvas altogether, use the [layout on its own](#layout-only).
 
 ## The view
 
@@ -210,6 +379,8 @@ A canvas cannot hold HTML. For nodes that are real elements, such as links, inpu
 | `update(data?, options?)` | Lay out and draw again, with new data, changed options, or both. |
 | `draw()` | Draw again without laying out. |
 | `nodeAt(x, y)` | The node at a canvas position such as `event.offsetX`, `event.offsetY`, or null. |
+| `hovered`, `selected` | The node under the pointer and the selected node, or null. |
+| `hover(node)`, `select(node)` | Set them yourself. Each returns whether anything changed, and redraws if it owns the canvas. |
 | `tree` | The current layout: `tree.nodes`, `tree.width`, `tree.height`. |
 | `transform` | `{ scale, x, y }` from the last draw: canvas = layout × `scale` + (`x`, `y`). |
 | `canvas` | The canvas being drawn on. |
@@ -247,7 +418,7 @@ Three more functions work with a layout:
 | Function | What it does |
 | :--- | :--- |
 | `nodeAt(tree, x, y)` | The node under a point in layout coordinates, for clicks and hovers. |
-| `drawTree(ctx, tree, options)` | Paints a layout you already have. Returns the transform it used. |
+| `drawTree(ctx, tree, options)` | Paints a layout you already have, with the appearance options above plus `hovered` and `selected` nodes. Returns the transform it used. |
 | `measureLabel(ctx, text, style)` | The box a label needs, using the context's current font. |
 
 ## What the layout guarantees
@@ -274,7 +445,7 @@ Besides the drop-in file, the repository holds a playground: a Vue 3 app for try
 | Path | What it is |
 | :--- | :--- |
 | `src/tidy-tree/tidy-tree.ts` | The drop-in file. |
-| `src/tidy-tree/demo.html` | A demo of it in plain JavaScript: all three kinds of target, and a 400-node tree. |
+| `src/tidy-tree/demo.html` | A demo of it in plain JavaScript: all three kinds of target, node styles, hover and selection, a custom painter, and a 400-node tree. |
 | `src/tidy-tree/*.test.ts` | Its tests. |
 | everything else under `src/` | The playground app. [docs/vue-tutorial.md](docs/vue-tutorial.md) walks through its code. |
 
