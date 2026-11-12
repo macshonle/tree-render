@@ -1,8 +1,54 @@
 import { describe, it, expect } from 'vitest'
-import { boundingBoxLayout } from './boundingBox'
-import { tidyLayout } from './tidy'
-import type { TreeNode, TreeExample } from '@/types'
-import type { LayoutContext, LaidOutChild, TextMeasurer } from '../types'
+import { boundingBoxLayout as boundingBoxTreeLayout } from './boundingBox'
+import { tidyLayout as tidyTreeLayout } from './tidy'
+import type { TreeNode, TreeExample, LayoutNode } from '@/types'
+import type { LayoutContext, LayoutOptions, TextMeasurer, YMonotonePolygon } from '../types'
+
+/** What these tests get back for a subtree: the positioned root, the box around every node, and the contour. */
+interface LayoutResult {
+  root: LayoutNode
+  bounds: { left: number; right: number; top: number; bottom: number }
+  polygonContour: YMonotonePolygon
+}
+
+/** A child subtree together with its own layout. */
+interface LaidOutChild {
+  node: TreeNode
+  layout: LayoutResult
+}
+
+type LayoutAlgorithm = (node: TreeNode, children: LaidOutChild[], context: LayoutContext) => LayoutResult
+
+/**
+ * The layout algorithms work on a whole tree at once. These tests were
+ * written for a per-node shape: lay the children out, then hand them to the
+ * parent, and get back the positioned root together with its bounds and
+ * contour. This presents a whole-tree algorithm in that shape so the tests
+ * can stay as they are. Only the tree structure is taken from `children`
+ * (many tests pass a bare parent plus separately prepared children); their
+ * layouts are recomputed.
+ */
+function perNode(
+  layout: (root: TreeNode, context: LayoutContext, options: LayoutOptions) => LayoutNode
+): LayoutAlgorithm {
+  return (node, children, context) => {
+    const tree: TreeNode = children.length > 0 ? { ...node, children: children.map((c) => c.node) } : node
+    const root = layout(tree, context, { contours: true })
+    const bounds = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity }
+    const collect = (n: LayoutNode) => {
+      bounds.left = Math.min(bounds.left, n.x - n.width / 2)
+      bounds.right = Math.max(bounds.right, n.x + n.width / 2)
+      bounds.top = Math.min(bounds.top, n.y - n.height / 2)
+      bounds.bottom = Math.max(bounds.bottom, n.y + n.height / 2)
+      n.children.forEach(collect)
+    }
+    collect(root)
+    return { root, bounds, polygonContour: root.polygonContour! }
+  }
+}
+
+const boundingBoxLayout = perNode(boundingBoxTreeLayout)
+const tidyLayout = perNode(tidyTreeLayout)
 
 /**
  * Create a mock text measurer that returns predictable dimensions.

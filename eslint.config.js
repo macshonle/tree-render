@@ -6,7 +6,7 @@ import globals from 'globals'
 export default tseslint.config(
   // Ignore patterns
   {
-    ignores: ['dist/', 'node_modules/', 'coverage/', 'src/vite-env.d.ts'],
+    ignores: ['dist/', 'dist-lib/', 'node_modules/', 'coverage/', 'src/vite-env.d.ts'],
   },
 
   // Base JS recommended rules

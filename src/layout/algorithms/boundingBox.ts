@@ -1,17 +1,7 @@
 import type { TreeNode, LayoutNode } from '@/types'
-import type { LayoutAlgorithm, LayoutResult, LaidOutChild, SubtreeBounds } from '../types'
-import {
-  calculateNodeSize,
-  translateNode,
-  translateBounds,
-  mergeBounds,
-  nodeBounds,
-} from '../utils'
-import {
-  createNodeContour,
-  buildSubtreeContour,
-  type ChildContourInfo,
-} from '../contour'
+import type { LayoutContext, LayoutOptions } from '../types'
+import { calculateNodeSize } from '../utils'
+import { attachContours } from '../contour'
 
 /**
  * Bounding Box layout algorithm.
@@ -27,122 +17,98 @@ import {
  * This produces clean, predictable layouts. For simple trees, the result
  * may be identical to Tidy layout. For complex trees with varying subtree
  * depths, Bounding Box will use more horizontal space than compact layouts.
+ *
+ * The whole tree is laid out in three linear passes over a flat node list:
+ * build the nodes, work out each subtree's width and each child's offset
+ * from its parent (children before parents), then turn the offsets into
+ * positions (parents before children). Nothing recurses and no subtree is
+ * ever copied or shifted, so time is proportional to the number of nodes.
+ *
+ * Returns centre coordinates with the root at the origin.
  */
-export const boundingBoxLayout: LayoutAlgorithm = (
-  node: TreeNode,
-  children: LaidOutChild[],
-  context
-): LayoutResult => {
+export function boundingBoxLayout(
+  root: TreeNode,
+  context: LayoutContext,
+  options: LayoutOptions = {}
+): LayoutNode {
   const { horizontalGap, verticalGap, reduceLeafSiblingGaps } = context.layout
-  const nodeSize = calculateNodeSize(node, context)
 
-  // Position current node at origin (will be translated by parent)
-  const layoutNode: LayoutNode = {
-    id: node.id,
-    label: node.label,
-    x: 0,
-    y: 0,
-    width: nodeSize.width,
-    height: nodeSize.height,
-    children: [],
-  }
-
-  // Create polygon contour for this node
-  const nodePolygonContour = createNodeContour(nodeSize.width, nodeSize.height)
-
-  // If no children, bounds and contour are just this node
-  if (children.length === 0) {
-    layoutNode.polygonContour = nodePolygonContour
-    return {
-      root: layoutNode,
-      bounds: nodeBounds(nodeSize.width, nodeSize.height),
-      polygonContour: nodePolygonContour,
-    }
-  }
-
-  function isLeaf(child: LaidOutChild): boolean {
-    return !child.node.children || child.node.children.length === 0
-  }
-
-  function getSiblingGap(left: LaidOutChild, right: LaidOutChild): number {
-    if (reduceLeafSiblingGaps && isLeaf(left) && isLeaf(right)) {
-      return horizontalGap / 2
-    }
-    return horizontalGap
-  }
-
-  // Calculate child subtree widths for horizontal positioning
-  const childWidths = children.map((c) => c.layout.bounds.right - c.layout.bounds.left)
-  const childGaps = children.length > 1
-    ? children.slice(0, -1).map((child, index) => getSiblingGap(child, children[index + 1]))
-    : []
-  const totalChildrenWidth = childWidths.reduce((sum, width) => sum + width, 0) +
-    childGaps.reduce((sum, gap) => sum + gap, 0)
-
-  // For top alignment: all children have their root tops at the same y
-  // Parent bottom is at nodeSize.height / 2
-  // Children tops should be at parentBottom + verticalGap
-  const parentBottom = nodeSize.height / 2
-  const childrenTopY = parentBottom + verticalGap
-
-  // Position children starting from left, centered under parent
-  let currentX = -totalChildrenWidth / 2
-  const positionedChildren: LayoutNode[] = []
-  const childBoundsList: SubtreeBounds[] = []
-  const childContourInfos: ChildContourInfo[] = []
-
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i]
-    const childLayout = child.layout
-    const childBounds = childLayout.bounds
-    const childWidth = childWidths[i]
-
-    // Place so child's left bound aligns with currentX
-    const childOffsetX = currentX - childBounds.left
-
-    // Top alignment: position child root top at childrenTopY
-    // Child root is at y=0, so its top is at -height/2
-    // We want: childRootTop + childOffsetY = childrenTopY
-    // So: -height/2 + childOffsetY = childrenTopY
-    // childOffsetY = childrenTopY + height/2
-    const childOffsetY = childrenTopY + childLayout.root.height / 2
-
-    // Clone and translate the child's layout
-    const translatedChild = structuredClone(childLayout.root)
-    translateNode(translatedChild, childOffsetX, childOffsetY)
-    positionedChildren.push(translatedChild)
-
-    // Track the translated bounds
-    childBoundsList.push(translateBounds(childBounds, childOffsetX, childOffsetY))
-
-    // Collect child contour info for polygon contour building
-    childContourInfos.push({
-      contour: childLayout.polygonContour,
-      offsetX: childOffsetX,
-      offsetY: childOffsetY,
-      width: childLayout.root.width,
-      height: childLayout.root.height,
+  // Breadth-first node list: a node's children are consecutive, and every
+  // parent comes before its children.
+  const sources: TreeNode[] = [root]
+  const nodes: LayoutNode[] = []
+  const firstChild: number[] = []
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i]
+    const size = calculateNodeSize(source, context)
+    nodes.push({
+      id: source.id,
+      label: source.label,
+      x: 0,
+      y: 0,
+      width: size.width,
+      height: size.height,
+      children: [],
     })
-
-    currentX += childWidth + (childGaps[i] ?? 0)
+    firstChild.push(sources.length)
+    if (source.children) {
+      for (const child of source.children) sources.push(child)
+    }
+  }
+  const count = nodes.length
+  for (let i = 0; i < count; i++) {
+    const childCount = sources[i].children?.length ?? 0
+    for (let k = 0; k < childCount; k++) nodes[i].children.push(nodes[firstChild[i] + k])
   }
 
-  // Build edge-aware polygon contour for this subtree
-  const subtreePolygonContour = buildSubtreeContour(
-    nodeSize.width,
-    nodeSize.height,
-    childContourInfos,
-    context.edgeStyle
-  )
+  const isLeaf = (index: number) => nodes[index].children.length === 0
+  const gapBefore = (index: number) =>
+    reduceLeafSiblingGaps && isLeaf(index - 1) && isLeaf(index) ? horizontalGap / 2 : horizontalGap
 
-  layoutNode.children = positionedChildren
-  layoutNode.polygonContour = subtreePolygonContour
+  // Children before parents: the horizontal extent of each subtree relative
+  // to its own root, and each child's horizontal offset from its parent.
+  const left = new Float64Array(count)
+  const right = new Float64Array(count)
+  const offsetX = new Float64Array(count)
+  for (let i = count - 1; i >= 0; i--) {
+    const node = nodes[i]
+    const childCount = node.children.length
+    let lo = -node.width / 2
+    let hi = node.width / 2
+    if (childCount > 0) {
+      const start = firstChild[i]
+      const end = start + childCount
+      let widths = 0
+      let gaps = 0
+      for (let c = start; c < end; c++) {
+        widths += right[c] - left[c]
+        if (c > start) gaps += gapBefore(c)
+      }
+      // Lay the subtree boxes side by side, centred as a group on the parent.
+      let cursor = -(widths + gaps) / 2
+      for (let c = start; c < end; c++) {
+        offsetX[c] = cursor - left[c]
+        lo = Math.min(lo, offsetX[c] + left[c])
+        hi = Math.max(hi, offsetX[c] + right[c])
+        cursor += right[c] - left[c] + (c + 1 < end ? gapBefore(c + 1) : 0)
+      }
+    }
+    left[i] = lo
+    right[i] = hi
+  }
 
-  // Compute overall bounds: union of this node's bounds and all children's bounds
-  const overallBounds = mergeBounds([
-    nodeBounds(nodeSize.width, nodeSize.height),
-    ...childBoundsList,
-  ])
+  // Parents before children: offsets become positions. Children are
+  // top-aligned one vertical gap below the bottom of their parent.
+  for (let i = 0; i < count; i++) {
+    const node = nodes[i]
+    const childrenTop = node.y + node.height / 2 + verticalGap
+    for (let c = firstChild[i], end = c + node.children.length; c < end; c++) {
+      nodes[c].x = node.x + offsetX[c]
+      nodes[c].y = childrenTop + nodes[c].height / 2
+    }
+  }
 
-  return { root: layoutNode, bounds: overallBounds, polygonContour: subtreePolygonContour }
+  if (options.contours) attachContours(nodes, context.edgeStyle)
+
+  return nodes[0]
 }

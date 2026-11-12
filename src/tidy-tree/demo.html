@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tidy-tree demo</title>
+    <style>
+      body { margin: 0; padding: 24px; font: 14px/1.4 system-ui, sans-serif; color: #0f172a; background: #f1f5f9; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p { margin: 0 0 16px; color: #475569; max-width: 70ch; }
+      .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+      .card { background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; min-width: 0; }
+      .card h2 { font-size: 13px; margin: 0 0 8px; }
+      .card code { font-size: 12px; color: #475569; }
+      .card.wide { grid-column: 1 / -1; }
+      .fixed { height: 280px; }
+      canvas.host { width: 100%; height: 280px; display: block; }
+      #status { color: #475569; }
+    </style>
+  </head>
+  <body>
+    <h1>tidy-tree</h1>
+    <p>
+      Plain JavaScript, no framework. The same tree drawn three ways by
+      <code>renderTree</code>, plus a large random tree to show the layout scales.
+    </p>
+
+    <div class="controls">
+      <label>Direction
+        <select id="direction">
+          <option>down</option><option>right</option><option>up</option><option>left</option>
+        </select>
+      </label>
+      <label>Connectors
+        <select id="edges">
+          <option>elbow</option><option>curve</option><option>straight</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="layered" /> Layered</label>
+      <span id="status"></span>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>1. An element with a height <code>renderTree(div, data)</code></h2>
+        <div id="fill" class="fixed"></div>
+      </div>
+      <div class="card">
+        <h2>2. An element with no height: the canvas grows to fit</h2>
+        <div id="auto"></div>
+      </div>
+      <div class="card">
+        <h2>3. Guest in your canvas <code>renderTree(ctx, data, { rect })</code></h2>
+        <canvas id="host" class="host"></canvas>
+      </div>
+      <div class="card wide">
+        <h2>4. <span id="bigCount"></span> random nodes of mixed sizes</h2>
+        <div id="big" class="fixed"></div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { tidyTree } from './tidy-tree.ts'
+      import { renderTree } from './tidy-tree-canvas.ts'
+
+      const data = {
+        label: 'Operations',
+        children: [
+          { label: 'Ingest', children: [{ label: 'Kafka' }, { label: 'Batch\nimports' }, { label: 'Webhooks' }] },
+          { label: 'Storage', children: [{ label: 'Warehouse', children: [{ label: 'Raw' }, { label: 'Curated' }] }] },
+          { label: 'Alerting' },
+          { label: 'Reporting', children: [{ label: 'Dashboards' }, { label: 'Scheduled\nexports\n(weekly)' }] },
+        ],
+      }
+
+      function randomTree(n) {
+        let seed = 7
+        const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296)
+        const make = () => ({ width: 20 + Math.floor(rnd() * 60), height: 12 + Math.floor(rnd() * 40), children: [] })
+        const root = make()
+        const all = [root]
+        for (let i = 1; i < n; i++) {
+          // Mostly attach near the top of the list so the tree stays bushy.
+          const parent = all[Math.floor(Math.pow(rnd(), 1.6) * all.length)]
+          const child = make()
+          parent.children.push(child)
+          all.push(child)
+        }
+        return root
+      }
+
+      const $ = (id) => document.getElementById(id)
+      const status = $('status')
+      const options = () => ({
+        direction: $('direction').value,
+        layered: $('layered').checked,
+        style: { edgeStyle: $('edges').value },
+      })
+
+      // 1 and 2: hand over an element.
+      const fill = renderTree($('fill'), data, {
+        ...options(),
+        onNodeClick: (node) => (status.textContent = node ? `Clicked “${node.data.label.replace(/\n/g, ' ')}”` : ''),
+      })
+      const auto = renderTree($('auto'), data, options())
+
+      // 3: the page owns this canvas and draws its own content; the tree is
+      // a guest in the right-hand part.
+      const host = $('host')
+      const ctx = host.getContext('2d')
+      let guest = null
+      function paintHost() {
+        const ratio = window.devicePixelRatio || 1
+        const width = host.clientWidth
+        const height = host.clientHeight
+        host.width = Math.round(width * ratio)
+        host.height = Math.round(height * ratio)
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+        ctx.fillStyle = '#f8fafc'
+        ctx.fillRect(0, 0, width, height)
+        const bars = [0.4, 0.75, 0.55, 0.9, 0.3]
+        ctx.fillStyle = '#38bdf8'
+        bars.forEach((v, i) => ctx.fillRect(12 + i * 18, height - 12 - v * (height - 40), 12, v * (height - 40)))
+        ctx.fillStyle = '#475569'
+        ctx.font = '12px system-ui, sans-serif'
+        ctx.fillText('host chart', 12, 16)
+        const rect = { x: 120, y: 8, width: width - 128, height: height - 16 }
+        const guestOptions = { ...options(), rect, style: { ...options().style, background: '#ffffff' } }
+        if (guest) guest.update(undefined, guestOptions)
+        else guest = renderTree(ctx, data, guestOptions)
+      }
+      paintHost()
+      new ResizeObserver(paintHost).observe(host)
+
+      // 4: a big tree. Sizes come from the data, so no text is measured.
+      const count = 400
+      const bigData = randomTree(count)
+      $('bigCount').textContent = count.toLocaleString()
+      const bigStyle = () => ({ ...options().style, nodeStrokeWidth: 0, nodeFill: '#475569', nodeRadius: 0, edgeWidth: 3 })
+      const big = renderTree($('big'), bigData, { ...options(), label: () => '', style: bigStyle() })
+
+      // And a much bigger one that is only laid out, to time it.
+      const huge = randomTree(200000)
+      const started = performance.now()
+      tidyTree(huge)
+      status.textContent = `Layout of 200,000 nodes took ${(performance.now() - started).toFixed(0)} ms`
+
+      for (const id of ['direction', 'edges', 'layered']) {
+        $(id).addEventListener('change', () => {
+          fill.update(undefined, options())
+          auto.update(undefined, options())
+          paintHost()
+          big.update(undefined, { ...options(), style: bigStyle() })
+        })
+      }
+      window.demo = { fill, auto, guest, big }
+    </script>
+  </body>
+</html>

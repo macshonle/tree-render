@@ -1,4 +1,4 @@
-import type { TreeNode, LayoutNode, TreeStyle, TreeExample, EdgeStyle } from '@/types'
+import type { TreeStyle, TreeExample, EdgeStyle } from '@/types'
 
 // ============================================================================
 // Edge-Aware Y-Monotone Polygon Contours
@@ -70,42 +70,15 @@ export interface TextMeasurer {
 }
 
 /**
- * Bounding rectangle for a subtree.
- * Coordinates are relative to the subtree root's position.
+ * Switches shared by all layout algorithms.
  */
-export interface SubtreeBounds {
-  /** Leftmost x coordinate (relative to root x) */
-  left: number
-  /** Rightmost x coordinate (relative to root x) */
-  right: number
-  /** Topmost y coordinate (relative to root y) */
-  top: number
-  /** Bottommost y coordinate (relative to root y) */
-  bottom: number
-}
-
-/**
- * Result of laying out a subtree.
- * Contains both the positioned nodes and the subtree's boundary information.
- */
-export interface LayoutResult {
-  /** The positioned node tree */
-  root: LayoutNode
-  /** Boundary information for composition with siblings */
-  bounds: SubtreeBounds
-  /** Edge-aware Y-monotone polygon contour */
-  polygonContour: YMonotonePolygon
-}
-
-/**
- * A child subtree that has already been laid out.
- * Parent algorithms receive these to compose into the final layout.
- */
-export interface LaidOutChild {
-  /** Original tree node (for accessing node properties) */
-  node: TreeNode
-  /** The laid-out result with positions and bounds */
-  layout: LayoutResult
+export interface LayoutOptions {
+  /**
+   * Attach a polygon contour to every node, for the debug overlay.
+   * Building them costs far more than the layout itself, so leave this off
+   * when the overlay is not showing.
+   */
+  contours?: boolean
 }
 
 /**
@@ -123,25 +96,3 @@ export interface LayoutContext {
   /** Edge style (for edge-aware contour building) */
   edgeStyle: EdgeStyle
 }
-
-/**
- * A layout algorithm function signature.
- *
- * Algorithms receive:
- * - The current node to position
- * - Pre-laid-out children (each child subtree already positioned with bounds)
- * - Layout context
- *
- * Algorithms return:
- * - LayoutResult with positioned tree and boundary information
- *
- * This design enables:
- * - Recursive composition (children laid out before parent)
- * - Polymorphic layouts (different algorithms per subtree)
- * - Boundary-aware composition (parent can compact children based on bounds)
- */
-export type LayoutAlgorithm = (
-  node: TreeNode,
-  children: LaidOutChild[],
-  context: LayoutContext
-) => LayoutResult

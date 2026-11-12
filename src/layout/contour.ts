@@ -8,6 +8,7 @@
  * the boundary at most twice, which is guaranteed for tree layouts.
  */
 
+import type { LayoutNode } from '@/types'
 import type { ContourPoint, YMonotonePolygon, EdgeContourStyle } from './types'
 
 // ============================================================================
@@ -354,6 +355,36 @@ function buildEnvelopeContour(
   return { left, right }
 }
 
+/**
+ * Give every node of a finished layout the contour of its subtree.
+ *
+ * The contours outline each subtree and its connectors for the debug
+ * overlay; no layout algorithm consults them. Building them costs far more
+ * than laying the tree out, so only do it when they will be drawn.
+ *
+ * @param nodes Every node of the layout, ordered so that each parent comes
+ *              before its children (breadth-first or pre-order both work)
+ * @param edgeStyle How edges connect parent to children
+ */
+export function attachContours(nodes: LayoutNode[], edgeStyle: EdgeContourStyle): void {
+  // Backwards, so each child has its contour before its parent needs it.
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i]
+    if (node.children.length === 0) {
+      node.polygonContour = createNodeContour(node.width, node.height)
+      continue
+    }
+    const children: ChildContourInfo[] = node.children.map((child) => ({
+      contour: child.polygonContour!,
+      offsetX: child.x - node.x,
+      offsetY: child.y - node.y,
+      width: child.width,
+      height: child.height,
+    }))
+    node.polygonContour = buildSubtreeContour(node.width, node.height, children, edgeStyle)
+  }
+}
+
 // ============================================================================
 // Contour Union (for merging sibling subtrees)
 // ============================================================================
@@ -648,328 +679,4 @@ function interpolateRightBoundaryX(boundary: ContourPoint[], y: number): number 
   }
 
   return isFinite(maxX) ? maxX : null
-}
-
-// ============================================================================
-// Segment Distance Calculation
-// ============================================================================
-
-/**
- * Compute the minimum Euclidean distance between two line segments.
- *
- * This properly handles diagonal segments that may approach each other
- * more closely than their horizontal gap at any Y level would suggest.
- */
-function minDistanceBetweenSegments(
-  ax1: number,
-  ay1: number,
-  ax2: number,
-  ay2: number,
-  bx1: number,
-  by1: number,
-  bx2: number,
-  by2: number
-): number {
-  // Check all four endpoint-to-segment distances
-  const d1 = pointToSegmentDistance(ax1, ay1, bx1, by1, bx2, by2)
-  const d2 = pointToSegmentDistance(ax2, ay2, bx1, by1, bx2, by2)
-  const d3 = pointToSegmentDistance(bx1, by1, ax1, ay1, ax2, ay2)
-  const d4 = pointToSegmentDistance(bx2, by2, ax1, ay1, ax2, ay2)
-
-  return Math.min(d1, d2, d3, d4)
-}
-
-/**
- * Compute the distance from a point to a line segment.
- */
-function pointToSegmentDistance(
-  px: number,
-  py: number,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number
-): number {
-  const dx = x2 - x1
-  const dy = y2 - y1
-  const lengthSq = dx * dx + dy * dy
-
-  if (lengthSq === 0) {
-    // Segment is a point
-    return Math.sqrt((px - x1) * (px - x1) + (py - y1) * (py - y1))
-  }
-
-  // Parameter t for the projection of point onto the line
-  let t = ((px - x1) * dx + (py - y1) * dy) / lengthSq
-
-  // Clamp t to [0, 1] to stay within the segment
-  t = Math.max(0, Math.min(1, t))
-
-  // Find the closest point on the segment
-  const closestX = x1 + t * dx
-  const closestY = y1 + t * dy
-
-  return Math.sqrt((px - closestX) * (px - closestX) + (py - closestY) * (py - closestY))
-}
-
-// ============================================================================
-// Intersection Detection (for subtree placement)
-// ============================================================================
-
-/**
- * Find the minimum horizontal gap between two contours (signed).
- * Used for determining placement direction.
- *
- * @returns Positive if contours are separated, negative if overlapping
- */
-function findSignedHorizontalGap(
-  leftContour: YMonotonePolygon,
-  rightContour: YMonotonePolygon
-): number | null {
-  // Find y-range overlap
-  const leftBounds = getContourBounds(leftContour)
-  const rightBounds = getContourBounds(rightContour)
-
-  const overlapTop = Math.max(leftBounds.top, rightBounds.top)
-  const overlapBottom = Math.min(leftBounds.bottom, rightBounds.bottom)
-
-  if (overlapTop >= overlapBottom) {
-    return null // No y-overlap
-  }
-
-  // Collect all y-breakpoints in the overlap range
-  const yBreakpoints = new Set<number>()
-  yBreakpoints.add(overlapTop)
-  yBreakpoints.add(overlapBottom)
-
-  for (const p of leftContour.right) {
-    if (p.y >= overlapTop && p.y <= overlapBottom) {
-      yBreakpoints.add(p.y)
-    }
-  }
-  for (const p of rightContour.left) {
-    if (p.y >= overlapTop && p.y <= overlapBottom) {
-      yBreakpoints.add(p.y)
-    }
-  }
-
-  const sortedYs = Array.from(yBreakpoints).sort((a, b) => a - b)
-
-  let minGap = Infinity
-
-  for (const y of sortedYs) {
-    const leftRightX = interpolateRightBoundaryX(leftContour.right, y)
-    const rightLeftX = interpolateLeftBoundaryX(rightContour.left, y)
-
-    if (leftRightX !== null && rightLeftX !== null) {
-      const gap = rightLeftX - leftRightX
-      minGap = Math.min(minGap, gap)
-    }
-  }
-
-  return isFinite(minGap) ? minGap : null
-}
-
-/**
- * Find the minimum Euclidean gap between two contours, accounting for diagonal segments.
- *
- * This computes the actual minimum Euclidean distance between the contour
- * boundaries, not just the horizontal distance at Y breakpoints. This is
- * essential for proper spacing when contours have diagonal edges that
- * approach each other.
- *
- * @param leftContour The left subtree's contour
- * @param rightContour The right subtree's contour (at its current position)
- * @returns The minimum Euclidean distance between the contours in the overlap region,
- *          or null if the contours don't overlap in y
- */
-export function findMinGap(
-  leftContour: YMonotonePolygon,
-  rightContour: YMonotonePolygon
-): number | null {
-  // Find y-range overlap
-  const leftBounds = getContourBounds(leftContour)
-  const rightBounds = getContourBounds(rightContour)
-
-  const overlapTop = Math.max(leftBounds.top, rightBounds.top)
-  const overlapBottom = Math.min(leftBounds.bottom, rightBounds.bottom)
-
-  if (overlapTop >= overlapBottom) {
-    return null // No y-overlap
-  }
-
-  let minGap = Infinity
-
-  // Get the relevant segments from each contour in the overlap region
-  const leftSegments = getSegmentsInYRange(leftContour.right, overlapTop, overlapBottom)
-  const rightSegments = getSegmentsInYRange(rightContour.left, overlapTop, overlapBottom)
-
-  // For each pair of segments that could potentially be closest, compute min distance
-  for (const leftSeg of leftSegments) {
-    for (const rightSeg of rightSegments) {
-      // Check if segments overlap in Y range
-      const segOverlapTop = Math.max(leftSeg.y1, rightSeg.y1)
-      const segOverlapBottom = Math.min(leftSeg.y2, rightSeg.y2)
-
-      if (segOverlapTop <= segOverlapBottom) {
-        // Segments overlap in Y - compute minimum Euclidean distance
-        const dist = minDistanceBetweenSegments(
-          leftSeg.x1, leftSeg.y1, leftSeg.x2, leftSeg.y2,
-          rightSeg.x1, rightSeg.y1, rightSeg.x2, rightSeg.y2
-        )
-        minGap = Math.min(minGap, dist)
-      }
-    }
-  }
-
-  return isFinite(minGap) ? minGap : null
-}
-
-/**
- * Extract line segments from a boundary that fall within a Y range.
- */
-function getSegmentsInYRange(
-  boundary: ContourPoint[],
-  yTop: number,
-  yBottom: number
-): Array<{ x1: number; y1: number; x2: number; y2: number }> {
-  const segments: Array<{ x1: number; y1: number; x2: number; y2: number }> = []
-
-  for (let i = 0; i < boundary.length - 1; i++) {
-    const p1 = boundary[i]
-    const p2 = boundary[i + 1]
-
-    // Check if segment overlaps with the Y range
-    if (p2.y >= yTop && p1.y <= yBottom) {
-      // Clip segment to the Y range if necessary
-      const y1 = Math.max(p1.y, yTop)
-      const y2 = Math.min(p2.y, yBottom)
-
-      // Interpolate X values at clipped Y positions
-      let x1: number, x2: number
-      if (p2.y === p1.y) {
-        // Horizontal segment
-        x1 = p1.x
-        x2 = p2.x
-      } else {
-        const t1 = (y1 - p1.y) / (p2.y - p1.y)
-        const t2 = (y2 - p1.y) / (p2.y - p1.y)
-        x1 = p1.x + t1 * (p2.x - p1.x)
-        x2 = p1.x + t2 * (p2.x - p1.x)
-      }
-
-      segments.push({ x1, y1, x2, y2 })
-    }
-  }
-
-  return segments
-}
-
-// Keep the old function name as an alias for backwards compatibility
-export const findMinHorizontalGap = findMinGap
-
-/**
- * Calculate the horizontal offset needed to place rightContour adjacent to leftContour
- * with a specified minimum gap (Euclidean distance).
- *
- * Uses the signed horizontal gap to determine the base offset direction, then
- * iteratively adjusts to ensure the Euclidean gap meets the requirement.
- *
- * @param leftContour The left subtree's contour (positioned)
- * @param rightContour The right subtree's contour (at origin)
- * @param desiredGap The minimum Euclidean gap to maintain between contours
- * @returns The x-offset to apply to rightContour
- */
-export function calculatePlacementOffset(
-  leftContour: YMonotonePolygon,
-  rightContour: YMonotonePolygon,
-  desiredGap: number
-): number {
-  const leftBounds = getContourBounds(leftContour)
-  const rightBounds = getContourBounds(rightContour)
-
-  // Check if there's Y-overlap at all
-  const overlapTop = Math.max(leftBounds.top, rightBounds.top)
-  const overlapBottom = Math.min(leftBounds.bottom, rightBounds.bottom)
-
-  if (overlapTop >= overlapBottom) {
-    // No Y-overlap - just place based on bounding boxes
-    return leftBounds.right - rightBounds.left + desiredGap
-  }
-
-  // Initial estimate based on Y-overlapping region only.
-  // Gap calculation is purely geometric - we only consider where contours
-  // actually overlap in Y, not parts at different Y levels.
-  const signedHGap = findSignedHorizontalGap(leftContour, rightContour)
-  const baseOffset = signedHGap !== null ? desiredGap - signedHGap : 0
-
-  // Verify the gap is achieved at base offset
-  const translatedRight = translateContour(rightContour, baseOffset, 0)
-  const actualGap = findMinGap(leftContour, translatedRight)
-
-  if (actualGap !== null && actualGap >= desiredGap - 0.5) {
-    return baseOffset
-  }
-
-  // Binary search for the right offset if base offset isn't sufficient
-  let lowOffset = baseOffset
-  let highOffset = baseOffset + desiredGap * 3 // Wider range for complex cases
-
-  const tolerance = 0.5
-  const maxIterations = 20
-
-  for (let i = 0; i < maxIterations; i++) {
-    const midOffset = (lowOffset + highOffset) / 2
-    const testRight = translateContour(rightContour, midOffset, 0)
-    const testGap = findMinGap(leftContour, testRight)
-
-    if (testGap === null) {
-      // Shouldn't happen if we started with Y-overlap, but handle gracefully
-      highOffset = midOffset
-      continue
-    }
-
-    const diff = testGap - desiredGap
-
-    if (Math.abs(diff) < tolerance) {
-      return midOffset
-    }
-
-    if (diff < 0) {
-      lowOffset = midOffset
-    } else {
-      highOffset = midOffset
-    }
-  }
-
-  return highOffset
-}
-
-/**
- * Merge two contours with a specified gap between them.
- *
- * This function:
- * 1. Calculates the offset needed to place rightContour adjacent to leftContour
- *    with the specified gap
- * 2. Translates rightContour by that offset
- * 3. Returns the union of both contours
- *
- * The result is a single contour that encompasses both input contours,
- * preserving all detail from both boundaries.
- *
- * @param leftContour The left subtree's contour (positioned)
- * @param rightContour The right subtree's contour (at its current position)
- * @param gap The minimum gap to maintain between contours
- * @returns Object containing the merged contour and the offset applied to rightContour
- */
-export function mergeContoursWithGap(
-  leftContour: YMonotonePolygon,
-  rightContour: YMonotonePolygon,
-  gap: number
-): { merged: YMonotonePolygon; rightOffset: number } {
-  const offset = calculatePlacementOffset(leftContour, rightContour, gap)
-  const translatedRight = translateContour(rightContour, offset, 0)
-  const merged = unionContours([leftContour, translatedRight])
-
-  return { merged, rightOffset: offset }
 }

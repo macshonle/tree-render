@@ -3,7 +3,7 @@
 
 SHELL := /bin/bash
 
-.PHONY: all dev build test lint typecheck clean install help
+.PHONY: all dev build lib test lint typecheck clean install help
 
 # Default target
 all: build
@@ -20,6 +20,10 @@ dev:
 build:
 	pnpm build
 
+# Compile the standalone tidy-tree module to plain JavaScript in dist-lib/
+lib:
+	pnpm build:lib
+
 # Run tests
 test:
 	pnpm test
@@ -35,6 +39,7 @@ typecheck:
 # Clean all generated files
 clean:
 	rm -rf dist
+	rm -rf dist-lib
 	rm -rf node_modules/.vite
 
 # Deep clean (includes node_modules)
@@ -47,6 +52,7 @@ help:
 	@echo "  make install    - Install dependencies"
 	@echo "  make dev        - Run the Vite development server"
 	@echo "  make build      - Build for production"
+	@echo "  make lib        - Compile the standalone tidy-tree module to dist-lib/"
 	@echo "  make test       - Run tests"
 	@echo "  make lint       - Lint the codebase"
 	@echo "  make typecheck  - Type check without building"

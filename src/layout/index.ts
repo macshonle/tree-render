@@ -1,23 +1,19 @@
 import type { TreeNode, LayoutNode, TreeStyle, TreeExample, LayoutAlgorithmType } from '@/types'
-import type { LayoutAlgorithm, LayoutContext, LayoutResult, LaidOutChild, TextMeasurer } from './types'
+import type { LayoutContext, LayoutOptions, TextMeasurer } from './types'
 import { boundingBoxLayout } from './algorithms/boundingBox'
 import { tidyLayout } from './algorithms/tidy'
 
 // Re-export types for convenience
-export type {
-  LayoutContext,
-  TextMeasurer,
-  TextMeasurement,
-  LayoutAlgorithm,
-  LayoutResult,
-  LaidOutChild,
-  SubtreeBounds,
-} from './types'
+export type { LayoutContext, LayoutOptions, TextMeasurer, TextMeasurement } from './types'
 
 /**
- * Registry of available layout algorithms
+ * Registry of available layout algorithms. Each lays out a whole tree and
+ * returns the positioned root.
  */
-const algorithms: Record<LayoutAlgorithmType, LayoutAlgorithm> = {
+const algorithms: Record<
+  LayoutAlgorithmType,
+  (root: TreeNode, context: LayoutContext, options: LayoutOptions) => LayoutNode
+> = {
   'bounding-box': boundingBoxLayout,
   'tidy': tidyLayout,
 }
@@ -46,32 +42,6 @@ export function createCanvasTextMeasurer(ctx: CanvasRenderingContext2D): TextMea
 }
 
 /**
- * Recursively lays out a tree, processing children before parents.
- * This enables boundary-aware composition where parent algorithms
- * can inspect child bounds to determine spacing.
- *
- * @param node - Current node to lay out
- * @param context - Layout context with style and measurement
- * @param getAlgorithm - Function to get algorithm for a node (enables per-subtree algorithms)
- * @returns LayoutResult with positioned tree and bounds
- */
-function layoutSubtree(
-  node: TreeNode,
-  context: LayoutContext,
-  getAlgorithm: (node: TreeNode) => LayoutAlgorithm
-): LayoutResult {
-  // Recursively lay out all children first
-  const laidOutChildren: LaidOutChild[] = (node.children ?? []).map((child) => ({
-    node: child,
-    layout: layoutSubtree(child, context, getAlgorithm),
-  }))
-
-  // Get the algorithm for this node and compose
-  const algorithm = getAlgorithm(node)
-  return algorithm(node, laidOutChildren, context)
-}
-
-/**
  * Main entry point for tree layout.
  * Calculates positions for all nodes based on the selected algorithm.
  *
@@ -79,13 +49,16 @@ function layoutSubtree(
  * @param treeData - Tree example metadata (for sizing mode, fixed dimensions)
  * @param style - Style configuration including layout settings
  * @param measureText - Text measurer (typically created from canvas context)
+ * @param options - Optional switches. Contours are attached unless `contours` is false;
+ *                  they are only needed by the debug overlay and are costly to build.
  * @returns Positioned LayoutNode tree
  */
 export function layoutTree(
   root: TreeNode,
   treeData: TreeExample,
   style: TreeStyle,
-  measureText: TextMeasurer
+  measureText: TextMeasurer,
+  options: LayoutOptions = {}
 ): LayoutNode {
   const context: LayoutContext = {
     measureText,
@@ -95,13 +68,8 @@ export function layoutTree(
     edgeStyle: style.edge.style,
   }
 
-  // For now, use the same algorithm for all nodes.
-  // Future: support per-node algorithm selection via TreeNode.layoutAlgorithm
-  const globalAlgorithm = algorithms[style.layout.algorithm]
-  const getAlgorithm = (_node: TreeNode) => globalAlgorithm
-
-  const result = layoutSubtree(root, context, getAlgorithm)
-  return result.root
+  const algorithm = algorithms[style.layout.algorithm]
+  return algorithm(root, context, { contours: options.contours !== false })
 }
 
 /**

@@ -1,374 +1,65 @@
-import type { TreeNode, LayoutNode, YMonotonePolygon } from '@/types'
-import type { LayoutAlgorithm, LayoutResult, LaidOutChild, SubtreeBounds } from '../types'
-import {
-  calculateNodeSize,
-  translateNode,
-  translateBounds,
-  mergeBounds,
-  nodeBounds,
-} from '../utils'
-import {
-  createNodeContour,
-  buildSubtreeContour,
-  translateContour,
-  unionContours,
-  calculatePlacementOffset,
-  findMinHorizontalGap,
-  type ChildContourInfo,
-} from '../contour'
+import type { TreeNode, LayoutNode } from '@/types'
+import type { LayoutContext, LayoutOptions } from '../types'
+import { calculateNodeSize } from '../utils'
+import { attachContours } from '../contour'
+import { tidyTree } from '@/tidy-tree/tidy-tree'
+import type { TidyNode } from '@/tidy-tree/tidy-tree'
 
 /**
  * Tidy layout algorithm.
  *
- * Implements Buchheim-style tree layout with:
+ * A thin adapter around the standalone module in src/tidy-tree, which does
+ * the real work: van der Ploeg's linear-time layout for trees with
+ * variable-sized nodes, made exactly mirror-symmetric by a second pass.
+ *
+ * - Subtrees interlock: a shallow subtree tucks in beside a deeper one
  * - Reflective symmetry: mirror images produce mirrored layouts
- * - Even gap distribution (apportionment): gaps between siblings are equalized
- * - Top-aligned children: sibling root tops at same y-level
- * - Contour-based compaction: subtrees can interlock
+ * - Small subtrees are spread evenly between larger neighbours
+ * - Top-aligned children, one vertical gap below their own parent
+ * - Parents are centred over their first and last child
  *
- * Algorithm phases:
- * 1. LR placement: place children left-to-right
- * 2. RL placement: place children right-to-left
- * 3. Average positions for symmetry
- * 4. Apportion gaps evenly across siblings
- * 5. Center children under parent
+ * Unlike the bounding-box algorithm, which is composed node by node, this
+ * lays out the whole tree at once and converts the result to the app's
+ * LayoutNode shape (centre coordinates, root at the origin).
+ *
+ * Spacing is measured between node boxes, not between polygon contours. The
+ * contours attached here are outlines of each finished subtree and its
+ * connectors, built after the fact; the layout does not consult them.
  */
-export const tidyLayout: LayoutAlgorithm = (
-  node: TreeNode,
-  children: LaidOutChild[],
-  context
-): LayoutResult => {
+export function tidyLayout(
+  root: TreeNode,
+  context: LayoutContext,
+  options: LayoutOptions = {}
+): LayoutNode {
   const { horizontalGap, verticalGap, reduceLeafSiblingGaps } = context.layout
-  const nodeSize = calculateNodeSize(node, context)
+  const isLeaf = (n: TidyNode<TreeNode>) => n.children.length === 0
 
-  function isLeaf(child: LaidOutChild): boolean {
-    return !child.node.children || child.node.children.length === 0
-  }
+  const tree = tidyTree(root, {
+    nodeSize: (node) => calculateNodeSize(node, context),
+    nodeGap: horizontalGap,
+    levelGap: verticalGap,
+    spacing: reduceLeafSiblingGaps
+      ? (a, b) => (a.parent === b.parent && isLeaf(a) && isLeaf(b) ? horizontalGap / 2 : horizontalGap)
+      : undefined,
+  })
 
-  function isLeafSiblingPair(leftIndex: number, rightIndex: number): boolean {
-    if (!reduceLeafSiblingGaps) return false
-    return isLeaf(children[leftIndex]) && isLeaf(children[rightIndex])
-  }
-
-  function gapForIndex(leftIndex: number, rightIndex: number): number {
-    return isLeafSiblingPair(leftIndex, rightIndex) ? horizontalGap / 2 : horizontalGap
-  }
-
-  // Position current node at origin (will be translated by parent)
-  const layoutNode: LayoutNode = {
-    id: node.id,
-    label: node.label,
-    x: 0,
-    y: 0,
-    width: nodeSize.width,
-    height: nodeSize.height,
+  const originX = tree.root.x + tree.root.width / 2
+  const originY = tree.root.y + tree.root.height / 2
+  const nodes: LayoutNode[] = tree.nodes.map((n) => ({
+    id: n.data.id,
+    label: n.data.label,
+    x: n.x + n.width / 2 - originX,
+    y: n.y + n.height / 2 - originY,
+    width: n.width,
+    height: n.height,
     children: [],
+  }))
+  // tree.nodes is breadth-first, so each node's children follow in order.
+  for (let i = 0, next = 1; i < nodes.length; i++) {
+    for (let k = 0; k < tree.nodes[i].children.length; k++) nodes[i].children.push(nodes[next++])
   }
 
-  // Create polygon contour for this node
-  const nodePolygonContour = createNodeContour(nodeSize.width, nodeSize.height)
+  if (options.contours) attachContours(nodes, context.edgeStyle)
 
-  // If no children, bounds and contour are just this node
-  if (children.length === 0) {
-    layoutNode.polygonContour = nodePolygonContour
-    return {
-      root: layoutNode,
-      bounds: nodeBounds(nodeSize.width, nodeSize.height),
-      polygonContour: nodePolygonContour,
-    }
-  }
-
-  // For top alignment: all children have their root tops at the same y
-  // Parent bottom is at nodeSize.height / 2
-  // Children tops should be at parentBottom + verticalGap
-  const parentBottom = nodeSize.height / 2
-  const childrenTopY = parentBottom + verticalGap
-
-  // Calculate y offset for each child (top-aligned)
-  const childOffsetYs = children.map(
-    (child) => childrenTopY + child.layout.root.height / 2
-  )
-
-  // Phase 1: Calculate LR positions (left-to-right placement)
-  const positionsLR = calculateLRPositions(children, childOffsetYs, gapForIndex)
-
-  // Phase 2: Calculate RL positions (right-to-left placement)
-  const positionsRL = calculateRLPositions(children, childOffsetYs, gapForIndex)
-
-  // Phase 3: Average positions for symmetry
-  const positionsAvg = children.map(
-    (_, i) => (positionsLR[i] + positionsRL[i]) / 2
-  )
-
-  // Phase 4: Apportion gaps evenly
-  const positionsFinal = apportionGaps(
-    positionsAvg,
-    children,
-    childOffsetYs,
-    gapForIndex,
-    isLeafSiblingPair
-  )
-
-  // Phase 5: Center under parent
-  const firstChild = children[0]
-  const lastChild = children[children.length - 1]
-  const childrenLeft = positionsFinal[0] - firstChild.layout.root.width / 2
-  const childrenRight =
-    positionsFinal[children.length - 1] + lastChild.layout.root.width / 2
-  const childrenCenterX = (childrenLeft + childrenRight) / 2
-  const centeringOffset = -childrenCenterX
-
-  // Apply final positions
-  const positionedChildren: LayoutNode[] = []
-  const childBoundsList: SubtreeBounds[] = []
-  const childContourInfos: ChildContourInfo[] = []
-
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i]
-    const childLayout = child.layout
-    const childOffsetX = positionsFinal[i] + centeringOffset
-    const childOffsetY = childOffsetYs[i]
-
-    // Clone and translate the child's layout
-    const translatedChild = structuredClone(childLayout.root)
-    translateNode(translatedChild, childOffsetX, childOffsetY)
-    positionedChildren.push(translatedChild)
-
-    // Track the translated bounds
-    const translatedBounds = translateBounds(
-      childLayout.bounds,
-      childOffsetX,
-      childOffsetY
-    )
-    childBoundsList.push(translatedBounds)
-
-    // Collect child contour info for polygon contour building
-    childContourInfos.push({
-      contour: childLayout.polygonContour,
-      offsetX: childOffsetX,
-      offsetY: childOffsetY,
-      width: childLayout.root.width,
-      height: childLayout.root.height,
-    })
-  }
-
-  // Build edge-aware polygon contour for this subtree
-  const subtreePolygonContour = buildSubtreeContour(
-    nodeSize.width,
-    nodeSize.height,
-    childContourInfos,
-    context.edgeStyle
-  )
-
-  layoutNode.children = positionedChildren
-  layoutNode.polygonContour = subtreePolygonContour
-
-  // Compute overall bounds: union of this node's bounds and all children's bounds
-  const overallBounds = mergeBounds([
-    nodeBounds(nodeSize.width, nodeSize.height),
-    ...childBoundsList,
-  ])
-
-  return { root: layoutNode, bounds: overallBounds, polygonContour: subtreePolygonContour }
-}
-
-/**
- * Calculate x-offsets using LR (left-to-right) contour placement.
- * First child at x=0, subsequent children placed adjacent to forest.
- */
-function calculateLRPositions(
-  children: LaidOutChild[],
-  childOffsetYs: number[],
-  gapForIndex: (leftIndex: number, rightIndex: number) => number
-): number[] {
-  const positions: number[] = []
-  let forestContour: YMonotonePolygon | null = null
-
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i]
-    const childLayout = child.layout
-    const childOffsetY = childOffsetYs[i]
-
-    let childOffsetX: number
-
-    if (forestContour === null) {
-      // First child - place at x=0
-      childOffsetX = 0
-    } else {
-      // Subsequent children - use contour-based placement
-      const childContourAtY = translateContour(
-        childLayout.polygonContour,
-        0,
-        childOffsetY
-      )
-      const gap = gapForIndex(i - 1, i)
-      childOffsetX = calculatePlacementOffset(
-        forestContour,
-        childContourAtY,
-        gap
-      )
-    }
-
-    positions.push(childOffsetX)
-
-    // Update forest contour
-    const childContourAtPosition = translateContour(
-      childLayout.polygonContour,
-      childOffsetX,
-      childOffsetY
-    )
-    if (forestContour === null) {
-      forestContour = childContourAtPosition
-    } else {
-      forestContour = unionContours([forestContour, childContourAtPosition])
-    }
-  }
-
-  return positions
-}
-
-/**
- * Calculate x-offsets using RL (right-to-left) contour placement.
- * Last child at x=0, preceding children placed adjacent to forest.
- */
-function calculateRLPositions(
-  children: LaidOutChild[],
-  childOffsetYs: number[],
-  gapForIndex: (leftIndex: number, rightIndex: number) => number
-): number[] {
-  const positions: number[] = new Array(children.length)
-  let forestContour: YMonotonePolygon | null = null
-
-  for (let i = children.length - 1; i >= 0; i--) {
-    const child = children[i]
-    const childLayout = child.layout
-    const childOffsetY = childOffsetYs[i]
-
-    let childOffsetX: number
-
-    if (forestContour === null) {
-      // First child (rightmost) - place at x=0
-      childOffsetX = 0
-    } else {
-      // Subsequent children - place to the LEFT of forest
-      const childContourAtY = translateContour(
-        childLayout.polygonContour,
-        0,
-        childOffsetY
-      )
-      // Calculate offset to place child to the left of forest with gap
-      const gap = gapForIndex(i, i + 1)
-      const offset = calculatePlacementOffset(
-        childContourAtY,
-        forestContour,
-        gap
-      )
-      childOffsetX = -offset
-    }
-
-    positions[i] = childOffsetX
-
-    // Update forest contour
-    const childContourAtPosition = translateContour(
-      childLayout.polygonContour,
-      childOffsetX,
-      childOffsetY
-    )
-    if (forestContour === null) {
-      forestContour = childContourAtPosition
-    } else {
-      forestContour = unionContours([childContourAtPosition, forestContour])
-    }
-  }
-
-  return positions
-}
-
-/**
- * Redistribute gaps across siblings (apportionment).
- *
- * After LR/RL averaging, siblings may have uneven gaps due to contour-based
- * placement. This function redistributes positions so gaps move toward a
- * uniform average, creating a more visually balanced layout.
- *
- * The algorithm:
- * 1. Calculate actual gaps between each pair of adjacent siblings using contours
- * 2. Separate gaps into two groups: leaf-leaf pairs and pairs involving non-leaves
- * 3. Compute the average gap for each group independently
- * 4. Redistribute positions so each gap moves toward its group's average
- * 5. Ensure no gap falls below the minimum (horizontalGap or horizontalGap/2 for leaves)
- *
- * Why separate averages for leaf vs non-leaf pairs?
- * When `reduceLeafSiblingGaps` is enabled, leaf siblings use half the normal gap.
- * Averaging them separately ensures leaf pairs stay compact while non-leaf pairs
- * maintain their larger spacing, preventing the reduced leaf gaps from pulling
- * non-leaf gaps down (or vice versa).
- *
- * @param positions - Current x positions of children (after LR/RL averaging)
- * @param children - The laid out child subtrees
- * @param childOffsetYs - Y offsets for each child
- * @param gapForIndex - Function returning minimum gap for a pair of siblings
- * @param isLeafSiblingPair - Function to check if both siblings are leaves
- * @returns New positions with redistributed gaps
- */
-function apportionGaps(
-  positions: number[],
-  children: LaidOutChild[],
-  childOffsetYs: number[],
-  gapForIndex: (leftIndex: number, rightIndex: number) => number,
-  isLeafSiblingPair: (leftIndex: number, rightIndex: number) => boolean
-): number[] {
-  if (children.length <= 1) {
-    return [...positions]
-  }
-
-  // Calculate actual gaps between adjacent children using contours
-  const gaps: number[] = []
-  const leafGaps: number[] = []
-  const nonLeafGaps: number[] = []
-  for (let i = 0; i < children.length - 1; i++) {
-    const leftContour = translateContour(
-      children[i].layout.polygonContour,
-      positions[i],
-      childOffsetYs[i]
-    )
-    const rightContour = translateContour(
-      children[i + 1].layout.polygonContour,
-      positions[i + 1],
-      childOffsetYs[i + 1]
-    )
-    const gap = findMinHorizontalGap(leftContour, rightContour)
-    const resolvedGap = gap ?? gapForIndex(i, i + 1)
-    gaps.push(resolvedGap)
-    if (isLeafSiblingPair(i, i + 1)) {
-      leafGaps.push(resolvedGap)
-    } else {
-      nonLeafGaps.push(resolvedGap)
-    }
-  }
-
-  const totalGap = gaps.reduce((sum, g) => sum + g, 0)
-  const avgGap = totalGap / gaps.length
-  const leafAvg = leafGaps.length > 0
-    ? leafGaps.reduce((sum, g) => sum + g, 0) / leafGaps.length
-    : avgGap
-  const nonLeafAvg = nonLeafGaps.length > 0
-    ? nonLeafGaps.reduce((sum, g) => sum + g, 0) / nonLeafGaps.length
-    : avgGap
-
-  // Redistribute: first child stays, others adjusted to achieve even gaps
-  const result: number[] = [positions[0]]
-  let cumulativeShift = 0
-
-  for (let i = 1; i < children.length; i++) {
-    const minGap = gapForIndex(i - 1, i)
-    const targetGap = isLeafSiblingPair(i - 1, i)
-      ? Math.max(leafAvg, minGap)
-      : Math.max(nonLeafAvg, minGap)
-    const gapAdjustment = targetGap - gaps[i - 1]
-    cumulativeShift += gapAdjustment
-    result.push(positions[i] + cumulativeShift)
-  }
-
-  return result
+  return nodes[0]
 }

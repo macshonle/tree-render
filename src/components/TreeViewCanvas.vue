@@ -133,7 +133,11 @@ function draw() {
 
   // Calculate tree layout using the selected algorithm
   const textMeasurer = createCanvasTextMeasurer(ctx)
-  const layoutRoot = layoutTree(props.treeData.root, props.treeData, props.styleConfig, textMeasurer)
+  // Contours are only drawn by the debug overlay, and only for a selection.
+  // They cost far more to build than the layout, so skip them otherwise.
+  const layoutRoot = layoutTree(props.treeData.root, props.treeData, props.styleConfig, textMeasurer, {
+    contours: debugMode.value && selection.value !== null,
+  })
 
   // Calculate tree bounds (for positioning)
   let minX = Infinity
