@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { tidyTree, linkTo, nodeAt } from './tidy-tree'
-import layoutSource from './tidy-tree.ts?raw'
+import source from './tidy-tree.ts?raw'
 import type { TidyDirection, TidyNode, TidyTree, TidyTreeOptions } from './tidy-tree'
 
 // ---------------------------------------------------------------------------
@@ -571,10 +571,26 @@ describe('helpers', () => {
 })
 
 describe('packaging', () => {
-  it('is self-contained: the layout file imports nothing', () => {
-    expect(layoutSource.length).toBeGreaterThan(1000)
-    expect(layoutSource).not.toMatch(/^\s*import\s/m)
-    expect(layoutSource).not.toMatch(/\brequire\(/)
-    expect(layoutSource).not.toMatch(/\b(document|window|HTMLElement|CanvasRenderingContext2D)\b/)
+  it('is one self-contained file: it imports nothing', () => {
+    expect(source.length).toBeGreaterThan(1000)
+    expect(source).not.toMatch(/^\s*import\s/m)
+    expect(source).not.toMatch(/\bimport\(/)
+    expect(source).not.toMatch(/\brequire\(/)
+  })
+
+  it('keeps the layout half free of the DOM', () => {
+    const [layoutHalf, canvasHalf] = source.split('// CANVAS RENDERER')
+    expect(layoutHalf).toContain('export function tidyTree')
+    expect(canvasHalf).toContain('export function renderTree')
+    // Code only: the header comment describes what the canvas half does.
+    const code = layoutHalf.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+    expect(code).not.toMatch(
+      /\b(document|window|HTMLElement|HTMLCanvasElement|CanvasRenderingContext2D|devicePixelRatio|ResizeObserver)\b/
+    )
+  })
+
+  it('loads and lays out where there is no DOM at all', () => {
+    expect(typeof document).toBe('undefined')
+    expect(tidyTree({ children: [{}, {}] }).nodes).toHaveLength(3)
   })
 })

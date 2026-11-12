@@ -12,5 +12,5 @@
     "outDir": "dist-lib",
     "skipLibCheck": true
   },
-  "files": ["src/tidy-tree/tidy-tree.ts", "src/tidy-tree/tidy-tree-canvas.ts"]
+  "files": ["src/tidy-tree/tidy-tree.ts"]
 }

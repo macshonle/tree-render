@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { tidyTree } from './tidy-tree'
-import canvasSource from './tidy-tree-canvas.ts?raw'
-import { drawTree, measureLabel, renderTree } from './tidy-tree-canvas'
-import type { TreeRect } from './tidy-tree-canvas'
+import { drawTree, measureLabel, renderTree, tidyTree } from './tidy-tree'
+import type { TreeRect } from './tidy-tree'
 
 // The tests run without a DOM. These stand-ins implement just enough of the
 // canvas and element interfaces to record what the renderer does to them.
@@ -351,9 +349,3 @@ describe('renderTree', () => {
   })
 })
 
-describe('packaging', () => {
-  it('depends only on the layout file', () => {
-    const sources = [...canvasSource.matchAll(/^import\s[^'"]*['"]([^'"]+)['"]/gm)].map((m) => m[1])
-    expect(new Set(sources)).toEqual(new Set(['./tidy-tree.js']))
-  })
-})
