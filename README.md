@@ -28,7 +28,7 @@ One file.
 | TypeScript, or a bundler that compiles it (Vite, esbuild, webpack with a TypeScript loader) | `src/tidy-tree/tidy-tree.ts` |
 | Plain JavaScript | `dist-lib/tidy-tree.js` |
 
-There is nothing to install and nothing else to copy. The file has no imports, no stylesheet and no assets.
+There is nothing to install and nothing else to copy. The file has no imports, no stylesheet and no assets. It includes its own [license](#license) notice, so it can be copied alone.
 
 `dist-lib/` is build output and is not checked in. To produce it, run `pnpm install` once and then `pnpm build:lib` (or `make lib`). That compiles the same source to `tidy-tree.js`, about 42 kB before minifying, and writes `tidy-tree.d.ts` beside it. The `.d.ts` is optional: it gives editors the types.
 
@@ -459,3 +459,9 @@ Besides the drop-in file, the repository holds a playground: a Vue 3 app for try
 | `pnpm lint` | Lint. |
 
 The layout tests check the guarantees above by brute force over every pair of nodes on a few thousand random trees, with a checker that shares no code with the implementation. They also cover symmetry, every direction, layering, hostile input, a 200,000-node chain and linear scaling. The canvas tests run against stand-in canvas objects and check what each kind of target does and does not touch.
+
+## License
+
+[MIT License](LICENSE). Copyright (c) 2025-2026 Macneil Shonle.
+
+The drop-in file ends with the full notice, so a copy of that one file meets the terms without anything else.

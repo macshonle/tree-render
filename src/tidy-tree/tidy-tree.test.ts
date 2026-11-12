@@ -578,6 +578,17 @@ describe('packaging', () => {
     expect(source).not.toMatch(/\brequire\(/)
   })
 
+  it('carries its license notice, so that it can be copied on its own', () => {
+    expect(source).toMatch(/^ \* Copyright \(c\) [\d-]+ Macneil Shonle\. MIT License/m)
+    // The whole notice, in a comment that minifiers keep.
+    const notice = source.slice(source.lastIndexOf('/*!'))
+    expect(notice).toContain('MIT License')
+    expect(notice).toContain('Copyright (c) 2025-2026 Macneil Shonle')
+    expect(notice).toContain('Permission is hereby granted, free of charge')
+    expect(notice).toContain('THE SOFTWARE IS PROVIDED "AS IS"')
+    expect(notice.trimEnd().endsWith('*/')).toBe(true)
+  })
+
   it('keeps the layout half free of the DOM', () => {
     const [layoutHalf, canvasHalf] = source.split('// CANVAS RENDERER')
     expect(layoutHalf).toContain('export function tidyTree')
